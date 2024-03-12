@@ -14,21 +14,40 @@
    limitations under the License.
 */
 
-package version
+package fs
 
-import "runtime"
-
-var (
-	// Package is filled at linking time
-	Package = "github.com/containerd/containerd"
-
-	// Version holds the complete version number. Filled in at linking time.
-	Version = "1.7.14+unknown"
-
-	// Revision is filled with the VCS (e.g. git) revision being used to build
-	// the program at linking time.
-	Revision = ""
-
-	// GoVersion is Go tree's version.
-	GoVersion = runtime.Version()
+import (
+	"io"
+	"os"
 )
+
+type dirReader struct {
+	buf []os.DirEntry
+	f   *os.File
+	err error
+}
+
+func (r *dirReader) Next() os.DirEntry {
+	if len(r.buf) == 0 {
+		infos, err := r.f.ReadDir(32)
+		if err != nil {
+			if err != io.EOF {
+				r.err = err
+			}
+			return nil
+		}
+		r.buf = infos
+	}
+
+	if len(r.buf) == 0 {
+		return nil
+	}
+	out := r.buf[0]
+	r.buf[0] = nil
+	r.buf = r.buf[1:]
+	return out
+}
+
+func (r *dirReader) Err() error {
+	return r.err
+}
