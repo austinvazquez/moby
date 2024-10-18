@@ -1,11 +1,13 @@
 package main
 
 import (
+	"runtime"
 	"testing"
 
 	"github.com/docker/docker/daemon/config"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
+	"go.opentelemetry.io/otel"
 	"gotest.tools/v3/assert"
 	is "gotest.tools/v3/assert/cmp"
 	"gotest.tools/v3/fs"
@@ -199,4 +201,30 @@ func TestConfigureDaemonLogs(t *testing.T) {
 	conf.LogLevel = "foobar"
 	configureDaemonLogs(conf)
 	assert.Check(t, is.Equal(logrus.WarnLevel, logrus.GetLevel()))
+}
+
+// TestOtelMeterLeak tests for a memory leak in the OTEL meter implementation.
+// Once the fixed OTEL is vendored, this test will fail - the workaround
+// and this test should be removed then.
+func TestOtelMeterLeak(t *testing.T) {
+	meter := otel.Meter("foo")
+
+	var before runtime.MemStats
+	runtime.ReadMemStats(&before)
+
+	const counters = 10 * 1000 * 1000
+	for i := 0; i < counters; i++ {
+		_, _ = meter.Int64Counter("bar")
+	}
+
+	var after runtime.MemStats
+	runtime.ReadMemStats(&after)
+
+	allocs := after.Mallocs - before.Mallocs
+	t.Log("Allocations:", allocs)
+
+	if allocs < 10 {
+		// TODO: Remove Workaround OTEL memory leak in cmd/dockerd/daemon.go
+		t.Fatal("Allocations count decreased. OTEL leak workaround is no longer needed!")
+	}
 }

@@ -14,6 +14,9 @@ import (
 	"github.com/moby/term"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric/noop"
 )
 
 var (
@@ -83,6 +86,12 @@ func main() {
 		TimestampFormat: jsonmessage.RFC3339NanoFixed,
 		FullTimestamp:   true,
 	})
+
+	// Workaround OTEL memory leak
+	// See: https://github.com/open-telemetry/opentelemetry-go-contrib/issues/5190
+	// The need for this workaround is checked by the TestOtelMeterLeak test
+	// TODO: Remove this workaround after upgrading to v1.30.0
+	otel.SetMeterProvider(noop.MeterProvider{})
 
 	// Set terminal emulation based on platform as required.
 	_, stdout, stderr := term.StdStreams()
