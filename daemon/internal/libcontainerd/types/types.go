@@ -101,3 +101,9 @@ type Task interface {
 
 // StdioCallback is called to connect a container or process stdio.
 type StdioCallback func(io *cio.DirectIO) (cio.IO, error)
+
+// LeaseManager defines methods for managing leases in containerd.
+type LeaseManager interface {
+	// CleanupLeases removes leases that are not associated with any resources.
+	CleanupLeases(context.Context) error
+}

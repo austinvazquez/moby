@@ -20,6 +20,7 @@ import (
 	testContainer "github.com/moby/moby/v2/integration/internal/container"
 	net "github.com/moby/moby/v2/integration/internal/network"
 	"github.com/moby/moby/v2/testutil"
+	"github.com/moby/moby/v2/testutil/daemon"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"gotest.tools/v3/assert"
 	is "gotest.tools/v3/assert/cmp"
@@ -768,4 +769,46 @@ func TestContainerdContainerImageInfo(t *testing.T) {
 		// This field is not set when not using containerd backed storage.
 		assert.Equal(t, ctr.Image, "")
 	}
+}
+
+func TestCreateContainerDoesNotLeakLeases(t *testing.T) {
+	ctx := testutil.StartSpan(baseContext, t)
+
+	d := daemon.New(t)
+	d.StartWithBusybox(ctx, t)
+	t.Cleanup(func() {
+		d.Stop(t)
+		d.Cleanup(t)
+	})
+
+	apiClient := d.NewClientT(t)
+	defer apiClient.Close()
+
+	info, err := apiClient.Info(ctx)
+	assert.NilError(t, err)
+
+	skip.If(t, info.Containerd == nil, "requires containerd")
+
+	id := testContainer.Run(ctx, t, apiClient, func(cfg *testContainer.TestContainerConfig) {
+		cfg.Config.Image = "busybox"
+	})
+	defer apiClient.ContainerRemove(ctx, id, container.RemoveOptions{Force: true})
+
+	c8dClient, err := containerd.New(info.Containerd.Address, containerd.WithDefaultNamespace(info.Containerd.Namespaces.Containers))
+	assert.NilError(t, err)
+	defer c8dClient.Close()
+
+	ctr, err := c8dClient.ContainerService().Get(ctx, id)
+	assert.NilError(t, err)
+
+	if testEnv.UsingSnapshotter() {
+		assert.Equal(t, ctr.Image, "docker.io/library/busybox:latest")
+	} else {
+		// This field is not set when not using containerd backed storage.
+		assert.Equal(t, ctr.Image, "")
+	}
+
+	leases, err := c8dClient.LeasesService().List(ctx)
+	assert.NilError(t, err)
+	assert.Check(t, is.Len(leases, 0), "expected no leases, but found %d: %v", len(leases), leases)
 }

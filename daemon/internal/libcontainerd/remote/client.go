@@ -147,6 +147,45 @@ func (c *client) NewContainer(ctx context.Context, id string, ociSpec *specs.Spe
 	return &created, nil
 }
 
+// CleanupLeases removes leases that are not associated with any resources.
+// This will return the last error encountered while trying to delete leases.
+func (c *client) CleanupLeases(ctx context.Context) error {
+	leaseMgr := c.client.LeasesService()
+	leases, err := leaseMgr.List(ctx)
+	if err != nil {
+		return err
+	}
+
+	var lastErr error
+	for _, l := range leases {
+		// Skip leases that are still in use.
+		resources, err := leaseMgr.ListResources(ctx, l)
+		if err != nil {
+			log.G(ctx).WithFields(log.Fields{
+				"lease": l.ID,
+				"error": err,
+			}).Debug("Failed to list containerd lease resources, skipping lease cleanup")
+			continue
+		}
+		if len(resources) > 0 {
+			continue
+		}
+
+		// Delete empty leases.
+		if err := leaseMgr.Delete(ctx, l); err != nil {
+			log.G(ctx).WithFields(log.Fields{
+				"lease": l.ID,
+				"error": err,
+			}).Debug("Failed to delete empty containerd lease")
+			lastErr = err
+			continue
+		}
+		log.G(ctx).WithField("lease", l.ID).Trace("Deleted empty containerd lease")
+	}
+
+	return lastErr
+}
+
 // NewTask creates a task for the specified containerd id
 func (c *container) NewTask(ctx context.Context, checkpointDir string, withStdin bool, attachStdio libcontainerdtypes.StdioCallback) (libcontainerdtypes.Task, error) {
 	var (
