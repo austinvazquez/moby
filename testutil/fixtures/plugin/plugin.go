@@ -13,7 +13,7 @@ import (
 	"github.com/moby/moby/api/types/events"
 	plugintypes "github.com/moby/moby/api/types/plugin"
 	"github.com/moby/moby/api/types/registry"
-	"github.com/moby/moby/client"
+	pluginopts "github.com/moby/moby/client/options/plugin"
 	"github.com/moby/moby/v2/daemon/pkg/plugin"
 	registrypkg "github.com/moby/moby/v2/daemon/pkg/registry"
 	"github.com/moby/moby/v2/daemon/server/backend"
@@ -51,7 +51,7 @@ func WithBinary(bin string) CreateOpt {
 // CreateClient is the interface used for `BuildPlugin` to interact with the
 // daemon.
 type CreateClient interface {
-	PluginCreate(context.Context, io.Reader, client.PluginCreateOptions) error
+	PluginCreate(context.Context, io.Reader, pluginopts.CreateOptions) error
 }
 
 // Create creates a new plugin with the specified name
@@ -71,7 +71,7 @@ func Create(ctx context.Context, c CreateClient, name string, opts ...CreateOpt)
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	return c.PluginCreate(ctx, tar, client.PluginCreateOptions{RepoName: name})
+	return c.PluginCreate(ctx, tar, pluginopts.CreateOptions{RepoName: name})
 }
 
 // CreateInRegistry makes a plugin (locally) and pushes it to a registry.

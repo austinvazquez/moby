@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	cerrdefs "github.com/containerd/errdefs"
+	"github.com/moby/moby/client/options/plugin"
 	"gotest.tools/v3/assert"
 	is "gotest.tools/v3/assert/cmp"
 )
@@ -19,14 +20,14 @@ func TestPluginDisableError(t *testing.T) {
 		client: newMockClient(errorMock(http.StatusInternalServerError, "Server error")),
 	}
 
-	err := client.PluginDisable(context.Background(), "plugin_name", PluginDisableOptions{})
+	err := client.PluginDisable(context.Background(), "plugin_name", plugin.DisableOptions{})
 	assert.Check(t, is.ErrorType(err, cerrdefs.IsInternal))
 
-	err = client.PluginDisable(context.Background(), "", PluginDisableOptions{})
+	err = client.PluginDisable(context.Background(), "", plugin.DisableOptions{})
 	assert.Check(t, is.ErrorType(err, cerrdefs.IsInvalidArgument))
 	assert.Check(t, is.ErrorContains(err, "value is empty"))
 
-	err = client.PluginDisable(context.Background(), "    ", PluginDisableOptions{})
+	err = client.PluginDisable(context.Background(), "    ", plugin.DisableOptions{})
 	assert.Check(t, is.ErrorType(err, cerrdefs.IsInvalidArgument))
 	assert.Check(t, is.ErrorContains(err, "value is empty"))
 }
@@ -49,6 +50,6 @@ func TestPluginDisable(t *testing.T) {
 		}),
 	}
 
-	err := client.PluginDisable(context.Background(), "plugin_name", PluginDisableOptions{})
+	err := client.PluginDisable(context.Background(), "plugin_name", plugin.DisableOptions{})
 	assert.NilError(t, err)
 }

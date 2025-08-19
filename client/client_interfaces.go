@@ -18,6 +18,7 @@ import (
 	"github.com/moby/moby/api/types/swarm"
 	"github.com/moby/moby/api/types/system"
 	"github.com/moby/moby/api/types/volume"
+	pluginopts "github.com/moby/moby/client/options/plugin"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -151,13 +152,13 @@ type PluginAPIClient interface {
 	PluginList(ctx context.Context, filter filters.Args) (plugin.ListResponse, error)
 	PluginRemove(ctx context.Context, name string, options PluginRemoveOptions) error
 	PluginEnable(ctx context.Context, name string, options PluginEnableOptions) error
-	PluginDisable(ctx context.Context, name string, options PluginDisableOptions) error
+	PluginDisable(ctx context.Context, name string, options pluginopts.DisableOptions) error
 	PluginInstall(ctx context.Context, name string, options PluginInstallOptions) (io.ReadCloser, error)
 	PluginUpgrade(ctx context.Context, name string, options PluginInstallOptions) (io.ReadCloser, error)
 	PluginPush(ctx context.Context, name string, registryAuth string) (io.ReadCloser, error)
 	PluginSet(ctx context.Context, name string, args []string) error
 	PluginInspectWithRaw(ctx context.Context, name string) (*plugin.Plugin, []byte, error)
-	PluginCreate(ctx context.Context, createContext io.Reader, options PluginCreateOptions) error
+	PluginCreate(ctx context.Context, createContext io.Reader, options pluginopts.CreateOptions) error
 }
 
 // ServiceAPIClient defines API client methods for the services
