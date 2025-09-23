@@ -99,6 +99,15 @@ RUN --mount=type=cache,target=/root/.cache/go-build,id=swagger-build-$TARGETPLAT
   xx-verify /build/swagger
 EOT
 
+FROM base AS swagger-gen
+WORKDIR /go/src/github.com/docker/docker
+COPY --from=swagger /build/swagger /usr/bin
+RUN --mount=type=bind,source=api/,target=/go/src/github.com/docker/docker/api/,rw \
+    --mount=type=bind,source=hack/,target=/go/src/github.com/docker/docker/hack/,readonly <<EOT
+    set -ex
+    bash hack/generate-swagger-api.sh
+EOT
+
 # frozen-images
 # See also frozenImages in "testutil/environment/protect.go" (which needs to
 # be updated when adding images to this list)

@@ -216,3 +216,8 @@ target "govulncheck" {
   no-cache-filter = ["run"]
   output = ["${DESTDIR}"]
 }
+
+target "swagger-gen" {
+  inherits = ["_common"]
+  target = "swagger-gen"
+}
