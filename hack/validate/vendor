@@ -12,20 +12,14 @@ validate_vendor_tidy() {
 	# run mod tidy
 	./hack/vendor.sh tidy
 	# check if any files have changed
-	git diff --quiet HEAD -- "${tidy_files[@]}"
+	git diff --quiet HEAD -- "${tidy_files[@]}" && [ -z "$(git ls-files --others --exclude-standard)" ]
 }
 
 validate_vendor_diff() {
-	mapfile -t changed_files < <(validate_diff --diff-filter=ACMR --name-only -- "${vendor_files[@]}")
-
-	if [ -n "${TEST_FORCE_VALIDATE:-}" ] || [ "${#changed_files[@]}" -gt 0 ]; then
-		# recreate vendor/
-		./hack/vendor.sh vendor
-		# check if any files have changed
-		git diff --quiet HEAD -- "${vendor_files[@]}"
-	else
-		echo >&2 'INFO: no vendor changes in diff; skipping vendor check.'
-	fi
+	# recreate vendor/
+	./hack/vendor.sh vendor
+	# check if any files have changed
+	git diff --quiet HEAD -- "${vendor_files[@]}" && [ -z "$(git ls-files --others --exclude-standard)" ]
 }
 
 validate_vendor_license() {
@@ -43,10 +37,16 @@ else
 	{
 		echo 'FAIL: Vendoring was not performed correctly!'
 		echo
-		echo 'The following files changed during re-vendor:'
-		echo
-		git diff --name-status HEAD -- "${vendor_files[@]}"
-		echo
+		if [ -n "$(git ls-files --others --exclude-standard)" ]; then
+			echo 'The following files are missing:'
+			git ls-files --others --exclude-standard
+			echo
+		fi
+		if [ -n "$(git diff --name-status HEAD -- "${vendor_files[@]}")" ]; then
+			echo 'The following files changed during re-vendor:'
+			git diff --name-status HEAD -- "${vendor_files[@]}"
+			echo
+		fi
 		echo 'Please revendor with hack/vendor.sh'
 		echo
 		git diff --diff-filter=M -- "${vendor_files[@]}"
