@@ -1,0 +1,61 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "schedule": [
+    "every weekend"
+  ],
+  "forkProcessing": "enabled",
+  "includeForks": true,
+  "prConcurrentLimit": 10,
+  "packageRules": [
+    {
+      "description": "Group AWS SDK updates",
+      "matchManagers": ["gomod"],
+      "matchPackagePrefixes": ["github.com/aws/aws-sdk-go-v2/"],
+      "groupName": "aws-sdk"
+    },
+    {
+      "description": "Group containerd updates",
+      "matchManagers": ["gomod"],
+      "matchPackagePrefixes": ["github.com/containerd/"],
+      "groupName": "containerd"
+    },
+    {
+      "description": "Group golang.org/x updates",
+      "matchManagers": ["gomod"],
+      "matchPackagePrefixes": ["golang.org/x/"],
+      "groupName": "golang-x"
+    },
+    {
+      "description": "Group moby/sys updates",
+      "matchManagers": ["gomod"],
+      "matchPackagePrefixes": ["github.com/moby/sys/"],
+      "groupName": "moby-sys"
+    },
+    {
+      "description": "Group OpenTelemetry updates",
+      "matchManagers": ["gomod"],
+      "matchPackagePrefixes": ["go.opentelemetry.io/"],
+      "groupName": "otel"
+    },
+    {
+      "description": "Enable gomod post-update options",
+      "matchManagers": ["gomod"],
+      "postUpdateOptions": ["gomodTidy", "gomodUpdateImportPaths"]
+    },
+    {
+      "description": "Group GitHub Actions updates",
+      "matchManagers": ["github-actions"],
+      "groupName": "github-actions"
+    },
+    {
+      "description": "Do not update go directive unless necessary",
+      "matchManagers": ["gomod"],
+      "matchDepNames": ["go"],
+      "matchDepTypes": ["golang"],
+      "enabled": false
+    }
+  ]
+}
