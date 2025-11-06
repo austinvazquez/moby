@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"net/url"
 	"slices"
+	"strings"
 
 	"github.com/moby/moby/api/types/build"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/api/types/system"
 	"github.com/moby/moby/api/types/volume"
+	"github.com/moby/moby/client/pkg/versions"
 )
 
 // DiskUsageOptions holds parameters for [Client.DiskUsage] operations.
@@ -152,76 +154,174 @@ func (cli *Client) DiskUsage(ctx context.Context, options DiskUsageOptions) (Dis
 		return DiskUsageResult{}, fmt.Errorf("Error retrieving disk usage: %v", err)
 	}
 
+	// Generate result from a legacy response.
+	if versions.LessThan(cli.version, "1.52") {
+		return diskUsageResultFromLegacyAPI(&du), nil
+	}
+
 	var r DiskUsageResult
-	if du.ImageUsage != nil {
+	if idu := du.ImageUsage; idu != nil {
 		r.Images = ImagesDiskUsage{
-			ActiveImages: du.ImageUsage.ActiveImages,
-			Reclaimable:  du.ImageUsage.Reclaimable,
-			TotalImages:  du.ImageUsage.TotalImages,
-			TotalSize:    du.ImageUsage.TotalSize,
+			ActiveImages: idu.ActiveImages,
+			Reclaimable:  idu.Reclaimable,
+			TotalImages:  idu.TotalImages,
+			TotalSize:    idu.TotalSize,
 		}
 
 		if options.Verbose {
-			r.Images.Items = slices.Clone(du.ImageUsage.Items)
-		}
-	} else {
-		// Fallback for legacy response.
-		r.Images = ImagesDiskUsage{
-			TotalSize: du.LayersSize,
-		}
-
-		if options.Verbose {
-			r.Images.Items = du.Images
+			r.Images.Items = slices.Clone(idu.Items)
 		}
 	}
 
-	if du.ContainerUsage != nil {
+	if cdu := du.ContainerUsage; cdu != nil {
 		r.Containers = ContainersDiskUsage{
-			ActiveContainers: du.ContainerUsage.ActiveContainers,
-			Reclaimable:      du.ContainerUsage.Reclaimable,
-			TotalContainers:  du.ContainerUsage.TotalContainers,
-			TotalSize:        du.ContainerUsage.TotalSize,
+			ActiveContainers: cdu.ActiveContainers,
+			Reclaimable:      cdu.Reclaimable,
+			TotalContainers:  cdu.TotalContainers,
+			TotalSize:        cdu.TotalSize,
 		}
 
 		if options.Verbose {
-			r.Containers.Items = slices.Clone(du.ContainerUsage.Items)
+			r.Containers.Items = slices.Clone(cdu.Items)
 		}
-	} else if du.Containers != nil && options.Verbose {
-		// Fallback for legacy response.
-		r.Containers.Items = du.Containers
 	}
 
-	if du.BuildCacheUsage != nil {
+	if bdu := du.BuildCacheUsage; bdu != nil {
 		r.BuildCache = BuildCacheDiskUsage{
-			ActiveBuildCacheRecords: du.BuildCacheUsage.ActiveBuildCacheRecords,
-			Reclaimable:             du.BuildCacheUsage.Reclaimable,
-			TotalBuildCacheRecords:  du.BuildCacheUsage.TotalBuildCacheRecords,
-			TotalSize:               du.BuildCacheUsage.TotalSize,
+			ActiveBuildCacheRecords: bdu.ActiveBuildCacheRecords,
+			Reclaimable:             bdu.Reclaimable,
+			TotalBuildCacheRecords:  bdu.TotalBuildCacheRecords,
+			TotalSize:               bdu.TotalSize,
 		}
 
 		if options.Verbose {
-			r.BuildCache.Items = slices.Clone(du.BuildCacheUsage.Items)
+			r.BuildCache.Items = slices.Clone(bdu.Items)
 		}
-	} else if du.BuildCache != nil && options.Verbose {
-		// Fallback for legacy response.
-		r.BuildCache.Items = du.BuildCache
 	}
 
-	if du.VolumeUsage != nil {
+	if vdu := du.VolumeUsage; vdu != nil {
 		r.Volumes = VolumesDiskUsage{
-			ActiveVolumes: du.VolumeUsage.ActiveVolumes,
-			Reclaimable:   du.VolumeUsage.Reclaimable,
-			TotalSize:     du.VolumeUsage.TotalSize,
-			TotalVolumes:  du.VolumeUsage.TotalVolumes,
+			ActiveVolumes: vdu.ActiveVolumes,
+			Reclaimable:   vdu.Reclaimable,
+			TotalVolumes:  vdu.TotalVolumes,
+			TotalSize:     vdu.TotalSize,
 		}
 
 		if options.Verbose {
-			r.Volumes.Items = slices.Clone(du.VolumeUsage.Items)
+			r.Volumes.Items = slices.Clone(vdu.Items)
 		}
-	} else if du.Volumes != nil && options.Verbose {
-		// Fallback for legacy response.
-		r.Volumes.Items = du.Volumes
 	}
 
 	return r, nil
+}
+
+func diskUsageResultFromLegacyAPI(du *system.DiskUsage) DiskUsageResult {
+	return DiskUsageResult{
+		Images:     imageDiskUsageFromLegacyAPI(du),
+		Containers: containerDiskUsageFromLegacyAPI(du),
+		BuildCache: buildCacheDiskUsageFromLegacyAPI(du),
+		Volumes:    volumeDiskUsageFromLegacyAPI(du),
+	}
+}
+
+func imageDiskUsageFromLegacyAPI(du *system.DiskUsage) ImagesDiskUsage {
+	var (
+		reclaimable  int64
+		activeImages int64
+	)
+
+	for _, i := range du.Images {
+		if i.Containers > 0 {
+			activeImages++
+		} else if i.Size >= 0 && i.SharedSize >= 0 {
+			reclaimable += i.Size - i.SharedSize
+		}
+	}
+
+	return ImagesDiskUsage{
+		ActiveImages: activeImages,
+		TotalImages:  int64(len(du.Images)),
+		TotalSize:    du.LayersSize,
+		Reclaimable:  reclaimable,
+		Items:        du.Images,
+	}
+}
+
+func containerDiskUsageFromLegacyAPI(du *system.DiskUsage) ContainersDiskUsage {
+	var (
+		activeContainers int64
+		totalSize        int64
+		used             int64
+	)
+
+	for _, c := range du.Containers {
+		totalSize += c.SizeRw
+		switch strings.ToLower(c.State) {
+		case "running", "paused", "restarting":
+			activeContainers++
+			used += c.SizeRw
+		}
+	}
+
+	return ContainersDiskUsage{
+		ActiveContainers: activeContainers,
+		TotalContainers:  int64(len(du.Containers)),
+		TotalSize:        totalSize,
+		Reclaimable:      totalSize - used,
+		Items:            du.Containers,
+	}
+}
+
+func buildCacheDiskUsageFromLegacyAPI(du *system.DiskUsage) BuildCacheDiskUsage {
+	var (
+		activeRecords int64
+		totalSize     int64
+		used          int64
+	)
+
+	for _, b := range du.BuildCache {
+		totalSize += b.Size
+
+		if b.InUse {
+			activeRecords++
+			used += b.Size
+		}
+	}
+
+	return BuildCacheDiskUsage{
+		ActiveBuildCacheRecords: activeRecords,
+		TotalBuildCacheRecords:  int64(len(du.BuildCache)),
+		TotalSize:               totalSize,
+		Reclaimable:             totalSize - used,
+		Items:                   du.BuildCache,
+	}
+}
+
+func volumeDiskUsageFromLegacyAPI(du *system.DiskUsage) VolumesDiskUsage {
+	var (
+		activeVolumes int64
+		totalSize     int64
+		used          int64
+	)
+
+	for _, v := range du.Volumes {
+		// Ignore volumes with no usage data
+		if v.UsageData != nil {
+			if v.UsageData.RefCount > 0 {
+				activeVolumes++
+				used += v.UsageData.Size
+			}
+			if v.UsageData.Size > 0 {
+				totalSize += v.UsageData.Size
+			}
+		}
+	}
+
+	return VolumesDiskUsage{
+		ActiveVolumes: activeVolumes,
+		TotalVolumes:  int64(len(du.Volumes)),
+		TotalSize:     totalSize,
+		Reclaimable:   totalSize - used,
+		Items:         du.Volumes,
+	}
 }
