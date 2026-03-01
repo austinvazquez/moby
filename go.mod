@@ -1,6 +1,6 @@
 module github.com/moby/moby/v2
 
-go 1.24.3
+go 1.25.0
 
 require (
 	cloud.google.com/go/compute/metadata v0.8.0
@@ -65,7 +65,7 @@ require (
 	github.com/moby/moby/api v1.53.0-rc.1
 	github.com/moby/moby/client v0.2.2-rc.1
 	github.com/moby/patternmatcher v0.6.0
-	github.com/moby/policy-helpers v0.0.0-20251105011237-bcaa71c99f14
+	github.com/moby/policy-helpers v0.0.0-20260211190020-824747bfdd3c
 	github.com/moby/profiles/apparmor v0.1.0
 	github.com/moby/profiles/seccomp v0.1.0
 	github.com/moby/pubsub v1.0.0
@@ -112,7 +112,7 @@ require (
 	golang.org/x/sys v0.39.0
 	golang.org/x/text v0.32.0
 	golang.org/x/time v0.14.0
-	google.golang.org/genproto/googleapis/api v0.0.0-20250825161204-c5933d9347a5
+	google.golang.org/genproto/googleapis/api v0.0.0-20250929231259-57b25ae835d4
 	google.golang.org/grpc v1.76.0
 	google.golang.org/protobuf v1.36.11
 	gotest.tools/v3 v3.5.2
@@ -183,7 +183,7 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.3.6 // indirect
 	github.com/googleapis/gax-go/v2 v2.15.0 // indirect
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0 // indirect
-	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.2 // indirect
+	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.3 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-immutable-radix v1.3.1 // indirect
 	github.com/hashicorp/go-msgpack v0.5.5 // indirect
@@ -251,7 +251,7 @@ require (
 	golang.org/x/tools v0.40.0 // indirect
 	google.golang.org/api v0.248.0 // indirect
 	google.golang.org/genproto v0.0.0-20250603155806-513f23925822 // indirect; TODO(thaJeztah): should we keep this one aligned with the other google.golang.org/genproto/xxx modules?
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20250825161204-c5933d9347a5 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20251103181224-f26f9409b101 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 	tags.cncf.io/container-device-interface/specs-go v1.1.0 // indirect
