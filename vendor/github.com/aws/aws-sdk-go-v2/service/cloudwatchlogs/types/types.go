@@ -298,11 +298,22 @@ type ConfigurationTemplate struct {
 	// to.
 	DeliveryDestinationType DeliveryDestinationType
 
+	// The schema of the delivery source configuration that is available for this log
+	// type. Each element describes a configuration that can be set when calling [PutDeliverySource],
+	// including the configuration name, type, and default value.
+	//
+	// [PutDeliverySource]: https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_PutDeliverySource.html
+	DeliverySourceConfiguration []DeliverySourceConfigurationSchema
+
 	// A string specifying which log type this configuration template applies to.
 	LogType *string
 
 	// A string specifying which resource type this configuration template applies to.
 	ResourceType *string
+
+	// The S3 Tables integration configuration for this configuration template,
+	// including the datasource name and type.
+	S3TablesIntegration *S3TablesIntegration
 
 	// A string specifying which service this configuration template applies to. For
 	// more information about supported services see [Enable logging from Amazon Web Services services.].
@@ -400,6 +411,10 @@ type CSV struct {
 	// value log event. If you omit this, the processor looks for the comma ,
 	// character as the delimiter.
 	Delimiter *string
+
+	// The path to the parent field to put transformed key value pairs under. If you
+	// omit this value, the key value pairs will be placed under the root node.
+	Destination *string
 
 	// The character used used as a text qualifier for a single column of data. If you
 	// omit this, the double quotation mark " character is used.
@@ -655,6 +670,9 @@ type DeliverySource struct {
 	// The Amazon Resource Name (ARN) that uniquely identifies this delivery source.
 	Arn *string
 
+	// The map of key-value pairs that configure the delivery source.
+	DeliverySourceConfiguration map[string]string
+
 	// The type of log that the source is sending. For valid values for this
 	// parameter, see the documentation for the source service.
 	LogType *string
@@ -670,8 +688,55 @@ type DeliverySource struct {
 	// The Amazon Web Services service that is sending logs.
 	Service *string
 
+	// The status of the delivery source. A delivery source can have the status ACTIVE
+	// or INACTIVE . Note: This value is defined for selective log types.
+	Status DeliverySourceStatus
+
+	// The reason for the status of the delivery source. A status reason of
+	// RESOURCE_DELETED indicates that the resource associated with the delivery source
+	// has been deleted. Note: This value is defined for selective log types.
+	StatusReason DeliverySourceStatusReason
+
 	// The tags that have been assigned to this delivery source.
 	Tags map[string]string
+
+	noSmithyDocumentSerde
+}
+
+// A structure that describes a single configuration for a log type, including its
+// name, value type, default value, and the range of supported values.
+type DeliverySourceConfigurationSchema struct {
+
+	// The default value of the configuration that is used when a value is not
+	// specified in a [PutDeliverySource]request.
+	//
+	// [PutDeliverySource]: https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_PutDeliverySource.html
+	//
+	// This member is required.
+	DefaultValue *string
+
+	// The name of the configuration.
+	//
+	// This member is required.
+	KeyName *string
+
+	// The data type of the configuration value. Valid values are string , boolean ,
+	// int , double , and long .
+	//
+	// This member is required.
+	ValueType DeliverySourceConfigurationSchemaValueType
+
+	// The maximum numeric value allowed for the configuration. This applies only when
+	// the valueType is a numeric type.
+	MaxValue *float64
+
+	// The minimum numeric value allowed for the configuration. This applies only when
+	// the valueType is a numeric type.
+	MinValue *float64
+
+	// The list of allowed values for the configuration. Empty for free-form
+	// configuration.
+	SupportedValues []string
 
 	noSmithyDocumentSerde
 }
@@ -707,9 +772,12 @@ type Destination struct {
 // destination type and associated settings for result delivery.
 type DestinationConfiguration struct {
 
+	// Configuration for delivering query results to a lookup table. The query results
+	// automatically populate or refresh the specified lookup table on each scheduled
+	// execution.
+	LookupTableConfiguration *LookupTableConfiguration
+
 	// Configuration for delivering query results to Amazon S3.
-	//
-	// This member is required.
 	S3Configuration *S3Configuration
 
 	noSmithyDocumentSerde
@@ -815,6 +883,30 @@ type FieldIndex struct {
 	// after the index policy that contains it was created.
 	FirstEventTime *int64
 
+	// The category of the field index:
+	//
+	//   - DEFAULT : Fields that CloudWatch Logs indexes by default. Examples include
+	//   @logStream and @data_format .
+	//
+	//   - CUSTOM : Fields that you added manually to the field index policy.
+	//   CloudWatch Logs always indexes these fields. These fields count toward the quota
+	//   of 20 fields for each log group.
+	//
+	//   - AUTO : Fields that CloudWatch Logs indexes automatically based on your query
+	//   patterns and usage. These fields do not count toward the field index quota.
+	//   CloudWatch Logs might update these fields based on changes in your query
+	//   patterns. To keep a field indexed permanently, add it to an account-level or
+	//   log-group level field index policy.
+	//
+	//   - INACTIVE : Fields that CloudWatch Logs indexed before but does not index
+	//   now. This happens if you remove a field from the field index policy or if
+	//   CloudWatch Logs automatically selects a different field based on your queries.
+	//
+	// For more information about automatically indexed fields, see [Automatically indexed fields].
+	//
+	// [Automatically indexed fields]: https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatchLogs-Field-Indexing-Automatic.html
+	IndexCategory IndexCategory
+
 	// The time and date of the most recent log event that matches this field index.
 	LastEventTime *int64
 
@@ -898,13 +990,13 @@ func (*GetLogObjectResponseStreamMemberFields) isGetLogObjectResponseStream() {}
 // For more information about this processor including examples, see [grok] in the
 // CloudWatch Logs User Guide.
 //
-// [grok]: https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatch-Logs-Transformation-Processors.html#CloudWatch-Logs-Transformation-Grok
+// [grok]: https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatch-Logs-Transformation-Configurable.html#CloudWatch-Logs-Transformation-Grok
 type Grok struct {
 
 	// The grok pattern to match against the log event. For a list of supported grok
 	// patterns, see [Supported grok patterns].
 	//
-	// [Supported grok patterns]: https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatch-Logs-Transformation-Processors.html#Grok-Patterns
+	// [Supported grok patterns]: https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatch-Logs-Transformation-Configurable.html#CloudWatch-Logs-Transformation-Grok
 	//
 	// This member is required.
 	Match *string
@@ -1292,6 +1384,11 @@ type LogGroup struct {
 	// [ListTagsForResource]: https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_ListTagsForResource.html
 	Arn *string
 
+	// Indicates whether bearer token authentication is enabled for this log group.
+	// When enabled, bearer token authentication is allowed on operations until it is
+	// explicitly disabled.
+	BearerTokenAuthenticationEnabled *bool
+
 	// The creation time of the log group, expressed as the number of milliseconds
 	// after Jan 1, 1970 00:00:00 UTC.
 	CreationTime *int64
@@ -1448,6 +1545,67 @@ type LogStream struct {
 	// are always accepted regardless of receiving an invalid sequence token. You don't
 	// need to obtain uploadSequenceToken to use a PutLogEvents action.
 	UploadSequenceToken *string
+
+	noSmithyDocumentSerde
+}
+
+// Contains metadata about a lookup table returned by DescribeLookupTables .
+type LookupTable struct {
+
+	// The description of the lookup table.
+	Description *string
+
+	// The ARN of the KMS key used to encrypt the lookup table data, if applicable.
+	KmsKeyId *string
+
+	// The time when the lookup table was last updated, expressed as the number of
+	// milliseconds after Jan 1, 1970 00:00:00 UTC .
+	LastUpdatedTime *int64
+
+	// The ARN of the lookup table.
+	LookupTableArn *string
+
+	// The name of the lookup table.
+	LookupTableName *string
+
+	// The number of data rows in the lookup table, excluding the header row.
+	RecordsCount *int64
+
+	// The size of the lookup table in bytes.
+	SizeBytes *int64
+
+	// The column headers from the first row of the CSV file.
+	TableFields []string
+
+	noSmithyDocumentSerde
+}
+
+// Configuration for a lookup table destination. Use it to automatically refresh a
+// lookup table with query results on a schedule.
+type LookupTableConfiguration struct {
+
+	// The ARN of the IAM role that grants permissions to create or update the lookup
+	// table with query results.
+	//
+	// This member is required.
+	RoleArn *string
+
+	// The name of the lookup table to create or update with query results. The name
+	// can contain only alphanumeric characters and underscores.
+	//
+	// This member is required.
+	TableName *string
+
+	// A description of the lookup table.
+	Description *string
+
+	// The ARN of the KMS key to use to encrypt the lookup table data. If you don't
+	// specify a key, the data is encrypted with an Amazon Web Services-owned key.
+	KmsKeyId *string
+
+	// Key-value pairs to associate with the lookup table for resource management and
+	// cost allocation. The service applies tags only during initial table creation.
+	Tags map[string]string
 
 	noSmithyDocumentSerde
 }
@@ -2339,6 +2497,10 @@ type QueryDefinition struct {
 	// The name of the query definition.
 	Name *string
 
+	// If this query definition contains a list of query parameters that define
+	// placeholder variables for the query string, that list appears here.
+	Parameters []QueryParameter
+
 	// The unique ID of the query definition.
 	QueryDefinitionId *string
 
@@ -2360,11 +2522,18 @@ type QueryDefinition struct {
 // in a DescribeQueries operation.
 type QueryInfo struct {
 
+	// The total number of bytes scanned by the query. This indicates the cost
+	// associated with the query.
+	BytesScanned *float64
+
 	// The date and time that this query was created.
 	CreateTime *int64
 
 	// The name of the log group scanned by this query.
 	LogGroupName *string
+
+	// The duration in milliseconds that the query took to execute.
+	QueryDuration *int64
 
 	// The unique ID number of this query.
 	QueryId *string
@@ -2381,6 +2550,33 @@ type QueryInfo struct {
 	// The status of this query. Possible values are Cancelled , Complete , Failed ,
 	// Running , Scheduled , and Unknown .
 	Status QueryStatus
+
+	// The ARN of the user who ran the query.
+	UserIdentity *string
+
+	noSmithyDocumentSerde
+}
+
+// This structure defines a query parameter for a saved CloudWatch Logs Insights
+// query definition. Query parameters are supported only for Logs Insights QL
+// queries. They are placeholder variables that you can reference in a query string
+// using the {{parameterName}} syntax. Each parameter can include a default value
+// and a description.
+type QueryParameter struct {
+
+	// The name of the query parameter. A query parameter name must start with a
+	// letter or underscore, and contain only letters, digits, and underscores.
+	//
+	// This member is required.
+	Name *string
+
+	// The default value to use for this query parameter if no value is supplied at
+	// execution time.
+	DefaultValue *string
+
+	// A description of the query parameter that explains its purpose or expected
+	// values.
+	Description *string
 
 	noSmithyDocumentSerde
 }
@@ -2424,6 +2620,13 @@ type QueryStatistics struct {
 
 	// The total number of log events scanned during the query.
 	RecordsScanned float64
+
+	// The number of rows in the final query result set. This value represents the
+	// total number of output rows across all pages. For queries that include
+	// post-aggregation filters (such as stats count(*) by field | filter count >
+	// threshold ), this value might be less than recordsMatched . It reflects only the
+	// rows that survived all operations in the query.
+	ResultCount float64
 
 	noSmithyDocumentSerde
 }
@@ -2597,6 +2800,13 @@ type S3Configuration struct {
 	// This member is required.
 	RoleArn *string
 
+	// The Amazon Resource Name (ARN) of the KMS encryption key. Must belong to the
+	// same Amazon Web Services Region as the destination Amazon S3 bucket.
+	KmsKeyId *string
+
+	// The Amazon Web Services accountId for the bucket owning account.
+	OwnerAccountId *string
+
 	noSmithyDocumentSerde
 }
 
@@ -2633,11 +2843,27 @@ type S3TableIntegrationSource struct {
 	// The unique identifier for this data source association.
 	Identifier *string
 
+	// The identifier of the parent data source for this association.
+	ParentSourceIdentifier *string
+
 	// The current status of the data source association.
 	Status S3TableIntegrationSourceStatus
 
 	// Additional information about the status of the data source association.
 	StatusReason *string
+
+	noSmithyDocumentSerde
+}
+
+// Contains information about the S3 Tables integration configuration for a
+// configuration template.
+type S3TablesIntegration struct {
+
+	// The name of the S3 Tables datasource.
+	DatasourceName *string
+
+	// The type of the S3 Tables datasource.
+	DatasourceType *string
 
 	noSmithyDocumentSerde
 }
@@ -2688,6 +2914,10 @@ type ScheduledQuerySummary struct {
 
 	// The cron expression that defines when the scheduled query runs.
 	ScheduleExpression *string
+
+	// The schedule type of the scheduled query. Valid values are CUSTOMER_MANAGED and
+	// AWS_MANAGED .
+	ScheduleType ScheduleType
 
 	// The ARN of the scheduled query.
 	ScheduledQueryArn *string
@@ -2887,6 +3117,55 @@ type SuppressionPeriod struct {
 	// Specifies the number of seconds, minutes or hours to suppress this anomaly.
 	// There is no maximum.
 	Value int32
+
+	noSmithyDocumentSerde
+}
+
+// Contains information about a syslog configuration associated with a log group.
+type SyslogConfiguration struct {
+
+	// The time when the syslog configuration was created, expressed as the number of
+	// milliseconds after Jan 1, 1970 00:00:00 UTC .
+	CreatedAt *int64
+
+	// The ARN of the log group associated with this syslog configuration.
+	LogGroupArn *string
+
+	// The source type for the syslog configuration.
+	SourceType SyslogSourceType
+
+	// The ID of the VPC endpoint used for syslog ingestion.
+	VpcEndpointId *string
+
+	noSmithyDocumentSerde
+}
+
+// A tag filter that specifies a tag key and optional tag values for filtering log
+// groups by tags.
+type TagFilter struct {
+
+	// The tag key to filter on.
+	//
+	// This member is required.
+	Key *string
+
+	// An optional list of tag values to filter on.
+	//
+	//   - If you specify a filter that contains more than one value for a key, the
+	//   response returns log groups that match any of the specified values for that key.
+	//
+	//   - If you don't specify values, the response returns all log groups that are
+	//   tagged with that key, with any or no value.
+	//
+	//   - Use * for wildcard matching. For example, prod* matches values that start
+	//   with prod .
+	//
+	//   - Use ! as a prefix for negation. For example, !prod matches values that are
+	//   not prod .
+	//
+	//   - Exact matching and negation are case-sensitive. Wildcard matching is
+	//   case-insensitive.
+	Values []string
 
 	noSmithyDocumentSerde
 }
