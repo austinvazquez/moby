@@ -4,11 +4,8 @@ package cloudwatchlogs
 
 import (
 	"context"
-	"fmt"
-	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
 	"github.com/aws/smithy-go/middleware"
-	smithyhttp "github.com/aws/smithy-go/transport/http"
 )
 
 // Creates a scheduled query that runs CloudWatch Logs Insights queries at regular
@@ -40,14 +37,13 @@ type CreateScheduledQueryInput struct {
 	ExecutionRoleArn *string
 
 	// The name of the scheduled query. The name must be unique within your account
-	// and region. Valid characters are alphanumeric characters, hyphens, underscores,
-	// and periods. Length must be between 1 and 255 characters.
+	// and region. Length must be between 1 and 300 characters.
 	//
 	// This member is required.
 	Name *string
 
-	// The query language to use for the scheduled query. Valid values are LogsQL , PPL
-	// , and SQL .
+	// The query language to use for the scheduled query. Valid values are CWLI , PPL ,
+	// and SQL .
 	//
 	// This member is required.
 	QueryLanguage types.QueryLanguage
@@ -69,9 +65,16 @@ type CreateScheduledQueryInput struct {
 	// and functionality.
 	Description *string
 
-	// Configuration for where to deliver query results. Currently supports Amazon S3
-	// destinations for storing query output.
+	// Configuration for where to deliver query results. Supports Amazon S3
+	// destinations for storing query output and lookup table destinations for
+	// automatically refreshing lookup tables with query results. You can configure one
+	// or both destination types.
 	DestinationConfiguration *types.DestinationConfiguration
+
+	// The time offset in seconds that defines the end of the lookback period for the
+	// query. Together with startTimeOffset , this determines the time window relative
+	// to the execution time over which the query runs.
+	EndTimeOffset *int64
 
 	// An array of log group names or ARNs to query. You can specify between 1 and 50
 	// log groups. Log groups can be identified by name or full ARN.
@@ -119,9 +122,6 @@ type CreateScheduledQueryOutput struct {
 }
 
 func (c *Client) addOperationCreateScheduledQueryMiddlewares(stack *middleware.Stack, options Options) (err error) {
-	if err := stack.Serialize.Add(&setOperationInputMiddleware{}, middleware.After); err != nil {
-		return err
-	}
 	err = stack.Serialize.Add(&awsAwsjson11_serializeOpCreateScheduledQuery{}, middleware.After)
 	if err != nil {
 		return err
@@ -130,68 +130,20 @@ func (c *Client) addOperationCreateScheduledQueryMiddlewares(stack *middleware.S
 	if err != nil {
 		return err
 	}
-	if err := addProtocolFinalizerMiddlewares(stack, options, "CreateScheduledQuery"); err != nil {
-		return fmt.Errorf("add protocol finalizers: %v", err)
-	}
 
-	if err = addlegacyEndpointContextSetter(stack, options); err != nil {
-		return err
-	}
-	if err = addSetLoggerMiddleware(stack, options); err != nil {
-		return err
-	}
-	if err = addClientRequestID(stack); err != nil {
-		return err
-	}
-	if err = addComputeContentLength(stack); err != nil {
-		return err
-	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}
 	if err = addComputePayloadSHA256(stack); err != nil {
 		return err
 	}
-	if err = addRetry(stack, options); err != nil {
-		return err
-	}
-	if err = addRawResponseToMetadata(stack); err != nil {
-		return err
-	}
-	if err = addRecordResponseTiming(stack); err != nil {
-		return err
-	}
-	if err = addSpanRetryLoop(stack, options); err != nil {
-		return err
-	}
-	if err = addClientUserAgent(stack, options); err != nil {
-		return err
-	}
-	if err = smithyhttp.AddErrorCloseResponseBodyMiddleware(stack); err != nil {
-		return err
-	}
-	if err = smithyhttp.AddCloseResponseBodyMiddleware(stack); err != nil {
-		return err
-	}
-	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
-		return err
-	}
-	if err = addTimeOffsetBuild(stack, c); err != nil {
-		return err
-	}
-	if err = addUserAgentRetryMode(stack, options); err != nil {
+	if err = addRecordResponseTiming(stack, options); err != nil {
 		return err
 	}
 	if err = addCredentialSource(stack, options); err != nil {
 		return err
 	}
 	if err = addOpCreateScheduledQueryValidationMiddleware(stack); err != nil {
-		return err
-	}
-	if err = stack.Initialize.Add(newServiceMetadataMiddleware_opCreateScheduledQuery(options.Region), middleware.Before); err != nil {
-		return err
-	}
-	if err = addRecursionDetection(stack); err != nil {
 		return err
 	}
 	if err = addRequestIDRetrieverMiddleware(stack); err != nil {
@@ -206,22 +158,8 @@ func (c *Client) addOperationCreateScheduledQueryMiddlewares(stack *middleware.S
 	if err = addDisableHTTPSMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = addInterceptBeforeRetryLoop(stack, options); err != nil {
-		return err
-	}
-	if err = addInterceptAttempt(stack, options); err != nil {
-		return err
-	}
 	if err = addInterceptors(stack, options); err != nil {
 		return err
 	}
 	return nil
-}
-
-func newServiceMetadataMiddleware_opCreateScheduledQuery(region string) *awsmiddleware.RegisterServiceMetadata {
-	return &awsmiddleware.RegisterServiceMetadata{
-		Region:        region,
-		ServiceID:     ServiceID,
-		OperationName: "CreateScheduledQuery",
-	}
 }
