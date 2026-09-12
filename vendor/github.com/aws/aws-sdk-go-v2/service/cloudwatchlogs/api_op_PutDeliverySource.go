@@ -4,11 +4,8 @@ package cloudwatchlogs
 
 import (
 	"context"
-	"fmt"
-	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
 	"github.com/aws/smithy-go/middleware"
-	smithyhttp "github.com/aws/smithy-go/transport/http"
 )
 
 // Creates or updates a logical delivery source. A delivery source represents an
@@ -69,10 +66,14 @@ type PutDeliverySourceInput struct {
 
 	// Defines the type of log that the source is sending.
 	//
+	//   - For Application Load Balancer, the valid values are ALB_ACCESS_LOGS ,
+	//   ALB_CONNECTION_LOGS , and ALB_HEALTH_CHECK_LOGS .
+	//
 	//   - For Amazon Bedrock Agents, the valid values are APPLICATION_LOGS and
 	//   EVENT_LOGS .
 	//
-	//   - For Amazon Bedrock Knowledge Bases, the valid value is APPLICATION_LOGS .
+	//   - For Amazon Bedrock Knowledge Bases, the valid values are APPLICATION_LOGS
+	//   and TRACES .
 	//
 	//   - For Amazon Bedrock AgentCore Runtime, the valid values are APPLICATION_LOGS
 	//   , USAGE_LOGS and TRACES .
@@ -83,10 +84,18 @@ type PutDeliverySourceInput struct {
 	//   - For Amazon Bedrock AgentCore Identity, the valid values are APPLICATION_LOGS
 	//   and TRACES .
 	//
+	//   - For Amazon Bedrock AgentCore Memory, the valid values are APPLICATION_LOGS
+	//   and TRACES .
+	//
 	//   - For Amazon Bedrock AgentCore Gateway, the valid values are APPLICATION_LOGS
 	//   and TRACES .
 	//
+	//   - For Amazon Bedrock AgentCore Payments, the valid values are APPLICATION_LOGS
+	//   and TRACES .
+	//
 	//   - For CloudFront, the valid value is ACCESS_LOGS .
+	//
+	//   - For DevOps Agent, the valid value is APPLICATION_LOGS .
 	//
 	//   - For Amazon CodeWhisperer, the valid value is EVENT_LOGS .
 	//
@@ -95,6 +104,17 @@ type PutDeliverySourceInput struct {
 	//
 	//   - For Elemental MediaTailor, the valid values are AD_DECISION_SERVER_LOGS ,
 	//   MANIFEST_SERVICE_LOGS , and TRANSCODE_LOGS .
+	//
+	//   - For Amazon EKS Auto Mode, the valid values are AUTO_MODE_BLOCK_STORAGE_LOGS
+	//   , AUTO_MODE_COMPUTE_LOGS , AUTO_MODE_IPAM_LOGS , and
+	//   AUTO_MODE_LOAD_BALANCING_LOGS .
+	//
+	//   - For Amazon EKS Capability Logs, the valid values are EKS_CAPABILITY_ACK_LOGS
+	//   , EKS_CAPABILITY_ARGOCD_APPLICATION_LOGS ,
+	//   EKS_CAPABILITY_ARGOCD_APPLICATIONSET_LOGS ,
+	//   EKS_CAPABILITY_ARGOCD_COMMITSERVER_LOGS ,
+	//   EKS_CAPABILITY_ARGOCD_REPOSERVER_LOGS , EKS_CAPABILITY_ARGOCD_SERVER_LOGS ,
+	//   and EKS_CAPABILITY_KRO_LOGS .
 	//
 	//   - For Entity Resolution, the valid value is WORKFLOW_LOGS .
 	//
@@ -105,13 +125,23 @@ type PutDeliverySourceInput struct {
 	//
 	//   - For Network Load Balancer, the valid value is NLB_ACCESS_LOGS .
 	//
-	//   - For PCS, the valid values are PCS_SCHEDULER_LOGS and PCS_JOBCOMP_LOGS .
+	//   - For PCS, the valid values are PCS_SCHEDULER_LOGS , PCS_JOBCOMP_LOGS , and
+	//   PCS_SCHEDULER_AUDIT_LOGS .
 	//
-	//   - For Quick Suite, the valid values are CHAT_LOGS and FEEDBACK_LOGS .
+	//   - For Quick, the valid values are AGENT_HOURS_LOGS , CHAT_LOGS , FEEDBACK_LOGS
+	//   , and INDEX_USAGE_LOGS .
 	//
 	//   - For Amazon Web Services RTB Fabric, the valid values is APPLICATION_LOGS .
 	//
 	//   - For Amazon Q, the valid values are EVENT_LOGS and SYNC_JOB_LOGS .
+	//
+	//   - For Amazon S3, the valid value is S3_SERVER_ACCESS_LOGS .
+	//
+	//   - For Amazon Web Services Security Hub CSPM, the valid value is
+	//   SECURITY_FINDING_LOGS .
+	//
+	//   - For Amazon Web Services Security Hub, the valid value is
+	//   SECURITY_FINDING_LOGS .
 	//
 	//   - For Amazon SES mail manager, the valid values are APPLICATION_LOGS and
 	//   TRAFFIC_POLICY_DEBUG_LOGS .
@@ -135,8 +165,18 @@ type PutDeliverySourceInput struct {
 	// logs. For example,
 	// arn:aws:workmail:us-east-1:123456789012:organization/m-1234EXAMPLEabcd1234abcd1234abcd1234
 	//
+	// For the SECURITY_FINDING_LOGS logType, use a wildcard ARN for the hub resource.
+	// For Amazon Web Services Security Hub CSPM, use
+	// arn:aws:securityhub:us-east-1:111122223333:hub/* and for Amazon Web Services
+	// Security Hub, use arn:aws:securityhub:us-east-1:111122223333:hubv2/*
+	//
 	// This member is required.
 	ResourceArn *string
+
+	// A map of key-value pairs to configure the delivery source. Both keys and values
+	// must be between 1 and 255 characters in length. For example, {"samplingRate":
+	// "50"} .
+	DeliverySourceConfiguration map[string]string
 
 	// An optional list of key-value pairs to associate with the resource.
 	//
@@ -161,9 +201,6 @@ type PutDeliverySourceOutput struct {
 }
 
 func (c *Client) addOperationPutDeliverySourceMiddlewares(stack *middleware.Stack, options Options) (err error) {
-	if err := stack.Serialize.Add(&setOperationInputMiddleware{}, middleware.After); err != nil {
-		return err
-	}
 	err = stack.Serialize.Add(&awsAwsjson11_serializeOpPutDeliverySource{}, middleware.After)
 	if err != nil {
 		return err
@@ -172,68 +209,20 @@ func (c *Client) addOperationPutDeliverySourceMiddlewares(stack *middleware.Stac
 	if err != nil {
 		return err
 	}
-	if err := addProtocolFinalizerMiddlewares(stack, options, "PutDeliverySource"); err != nil {
-		return fmt.Errorf("add protocol finalizers: %v", err)
-	}
 
-	if err = addlegacyEndpointContextSetter(stack, options); err != nil {
-		return err
-	}
-	if err = addSetLoggerMiddleware(stack, options); err != nil {
-		return err
-	}
-	if err = addClientRequestID(stack); err != nil {
-		return err
-	}
-	if err = addComputeContentLength(stack); err != nil {
-		return err
-	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}
 	if err = addComputePayloadSHA256(stack); err != nil {
 		return err
 	}
-	if err = addRetry(stack, options); err != nil {
-		return err
-	}
-	if err = addRawResponseToMetadata(stack); err != nil {
-		return err
-	}
-	if err = addRecordResponseTiming(stack); err != nil {
-		return err
-	}
-	if err = addSpanRetryLoop(stack, options); err != nil {
-		return err
-	}
-	if err = addClientUserAgent(stack, options); err != nil {
-		return err
-	}
-	if err = smithyhttp.AddErrorCloseResponseBodyMiddleware(stack); err != nil {
-		return err
-	}
-	if err = smithyhttp.AddCloseResponseBodyMiddleware(stack); err != nil {
-		return err
-	}
-	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
-		return err
-	}
-	if err = addTimeOffsetBuild(stack, c); err != nil {
-		return err
-	}
-	if err = addUserAgentRetryMode(stack, options); err != nil {
+	if err = addRecordResponseTiming(stack, options); err != nil {
 		return err
 	}
 	if err = addCredentialSource(stack, options); err != nil {
 		return err
 	}
 	if err = addOpPutDeliverySourceValidationMiddleware(stack); err != nil {
-		return err
-	}
-	if err = stack.Initialize.Add(newServiceMetadataMiddleware_opPutDeliverySource(options.Region), middleware.Before); err != nil {
-		return err
-	}
-	if err = addRecursionDetection(stack); err != nil {
 		return err
 	}
 	if err = addRequestIDRetrieverMiddleware(stack); err != nil {
@@ -248,22 +237,8 @@ func (c *Client) addOperationPutDeliverySourceMiddlewares(stack *middleware.Stac
 	if err = addDisableHTTPSMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = addInterceptBeforeRetryLoop(stack, options); err != nil {
-		return err
-	}
-	if err = addInterceptAttempt(stack, options); err != nil {
-		return err
-	}
 	if err = addInterceptors(stack, options); err != nil {
 		return err
 	}
 	return nil
-}
-
-func newServiceMetadataMiddleware_opPutDeliverySource(region string) *awsmiddleware.RegisterServiceMetadata {
-	return &awsmiddleware.RegisterServiceMetadata{
-		Region:        region,
-		ServiceID:     ServiceID,
-		OperationName: "PutDeliverySource",
-	}
 }
