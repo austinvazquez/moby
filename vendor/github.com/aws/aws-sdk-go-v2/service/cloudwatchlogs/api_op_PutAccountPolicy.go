@@ -4,17 +4,46 @@ package cloudwatchlogs
 
 import (
 	"context"
-	"fmt"
-	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
 	"github.com/aws/smithy-go/middleware"
-	smithyhttp "github.com/aws/smithy-go/transport/http"
 )
 
 // Creates an account-level data protection policy, subscription filter policy,
 // field index policy, transformer policy, or metric extraction policy that applies
 // to all log groups, a subset of log groups, or a data source name and type
 // combination in the account.
+//
+// PutAccountPolicy is an account-wide administrative operation intended for
+// CloudWatch Logs administrators. Because it affects all log groups (or a broad
+// subset) in the account, you should grant logs:PutAccountPolicy permissions only
+// to administrators who manage logging configuration across the account, not to
+// application teams or individual log group owners.
+//
+// # Conflict resolution between account-level and log-group-level policies
+//
+// When both an account-level policy and a log-group-level policy of the same type
+// apply to a log group, the resolution depends on the policy type:
+//
+//   - Data protection — The two policies are cumulative. Any sensitive term
+//     specified in either the account-level or the log-group-level policy is masked.
+//
+//   - Subscription filters — Account-level and log-group-level subscription
+//     filters are additive. A log group can have up to 1 account-level and up to 2
+//     log-group-level subscription filters.
+//
+//   - Transformers — A log-group-level transformer overrides the account-level
+//     transformer. If a log group has its own transformer, it ignores the
+//     account-level transformer policy.
+//
+//   - Field index policies — If a log group has its own field index policy
+//     (created with PutIndexPolicy ), any account-level policy that uses
+//     LogGroupNamePrefix selection criteria or has no selection criteria is ignored
+//     for that log group. However, account-level policies that use DataSourceName
+//     and DataSourceType selection criteria still apply alongside the
+//     log-group-level policy.
+//
+//   - Metric extraction policies — Metric extraction policies are account-level
+//     only and have no log-group-level equivalent, so no conflict resolution applies.
 //
 // For field index policies, you can configure indexed fields as facets to enable
 // interactive exploration of your logs. Facets provide value distributions and
@@ -291,11 +320,11 @@ import (
 // When a policy disables EMF metric creation for a log group, log events in the
 // EMF format are still ingested, but no CloudWatch Metrics are created from them.
 //
-// Creating a policy disables metrics for AWS features that use EMF to create
-// metrics, such as CloudWatch Container Insights and CloudWatch Application
-// Signals. To prevent turning off those features by accident, we recommend that
-// you exclude the underlying log-groups through a selection-criteria such as
-// LogGroupNamePrefix NOT IN ["/aws/containerinsights",
+// Creating a policy disables metrics for Amazon Web Services features that use
+// EMF to create metrics, such as CloudWatch Container Insights and CloudWatch
+// Application Signals. To prevent turning off those features by accident, we
+// recommend that you exclude the underlying log-groups through a
+// selection-criteria such as LogGroupNamePrefix NOT IN ["/aws/containerinsights",
 // "/aws/ecs/containerinsights", "/aws/application-signals/data"] .
 //
 // Each account can have either one account-level metric extraction policy that
@@ -531,9 +560,6 @@ type PutAccountPolicyOutput struct {
 }
 
 func (c *Client) addOperationPutAccountPolicyMiddlewares(stack *middleware.Stack, options Options) (err error) {
-	if err := stack.Serialize.Add(&setOperationInputMiddleware{}, middleware.After); err != nil {
-		return err
-	}
 	err = stack.Serialize.Add(&awsAwsjson11_serializeOpPutAccountPolicy{}, middleware.After)
 	if err != nil {
 		return err
@@ -542,68 +568,20 @@ func (c *Client) addOperationPutAccountPolicyMiddlewares(stack *middleware.Stack
 	if err != nil {
 		return err
 	}
-	if err := addProtocolFinalizerMiddlewares(stack, options, "PutAccountPolicy"); err != nil {
-		return fmt.Errorf("add protocol finalizers: %v", err)
-	}
 
-	if err = addlegacyEndpointContextSetter(stack, options); err != nil {
-		return err
-	}
-	if err = addSetLoggerMiddleware(stack, options); err != nil {
-		return err
-	}
-	if err = addClientRequestID(stack); err != nil {
-		return err
-	}
-	if err = addComputeContentLength(stack); err != nil {
-		return err
-	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}
 	if err = addComputePayloadSHA256(stack); err != nil {
 		return err
 	}
-	if err = addRetry(stack, options); err != nil {
-		return err
-	}
-	if err = addRawResponseToMetadata(stack); err != nil {
-		return err
-	}
-	if err = addRecordResponseTiming(stack); err != nil {
-		return err
-	}
-	if err = addSpanRetryLoop(stack, options); err != nil {
-		return err
-	}
-	if err = addClientUserAgent(stack, options); err != nil {
-		return err
-	}
-	if err = smithyhttp.AddErrorCloseResponseBodyMiddleware(stack); err != nil {
-		return err
-	}
-	if err = smithyhttp.AddCloseResponseBodyMiddleware(stack); err != nil {
-		return err
-	}
-	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
-		return err
-	}
-	if err = addTimeOffsetBuild(stack, c); err != nil {
-		return err
-	}
-	if err = addUserAgentRetryMode(stack, options); err != nil {
+	if err = addRecordResponseTiming(stack, options); err != nil {
 		return err
 	}
 	if err = addCredentialSource(stack, options); err != nil {
 		return err
 	}
 	if err = addOpPutAccountPolicyValidationMiddleware(stack); err != nil {
-		return err
-	}
-	if err = stack.Initialize.Add(newServiceMetadataMiddleware_opPutAccountPolicy(options.Region), middleware.Before); err != nil {
-		return err
-	}
-	if err = addRecursionDetection(stack); err != nil {
 		return err
 	}
 	if err = addRequestIDRetrieverMiddleware(stack); err != nil {
@@ -618,22 +596,8 @@ func (c *Client) addOperationPutAccountPolicyMiddlewares(stack *middleware.Stack
 	if err = addDisableHTTPSMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = addInterceptBeforeRetryLoop(stack, options); err != nil {
-		return err
-	}
-	if err = addInterceptAttempt(stack, options); err != nil {
-		return err
-	}
 	if err = addInterceptors(stack, options); err != nil {
 		return err
 	}
 	return nil
-}
-
-func newServiceMetadataMiddleware_opPutAccountPolicy(region string) *awsmiddleware.RegisterServiceMetadata {
-	return &awsmiddleware.RegisterServiceMetadata{
-		Region:        region,
-		ServiceID:     ServiceID,
-		OperationName: "PutAccountPolicy",
-	}
 }
