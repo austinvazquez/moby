@@ -4,11 +4,10 @@ package cloudwatchlogs
 
 import (
 	"context"
-	"fmt"
-	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/schemas"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
+	smithy "github.com/aws/smithy-go"
 	"github.com/aws/smithy-go/middleware"
-	smithyhttp "github.com/aws/smithy-go/transport/http"
 )
 
 // Returns the results from the specified query.
@@ -28,6 +27,12 @@ import (
 // from automated scheduled query executions. Scheduled queries use GetQueryResults
 // internally to retrieve query results for processing and delivery to configured
 // destinations.
+//
+// You can retrieve up to 100,000 log event results from a query, if available, by
+// using pagination. Use the nextToken returned in the response to request
+// additional pages of results, with each page returning up to 10,000 log events.
+// This is only supported for Logs Insights QL and is currently not supported for
+// PPL and SQL query languages.
 //
 // If you are using CloudWatch cross-account observability, you can use this
 // operation in a monitoring account to start queries in linked source accounts.
@@ -59,7 +64,33 @@ type GetQueryResultsInput struct {
 	// This member is required.
 	QueryId *string
 
+	// The maximum number of log events to return in the response. The maximum is
+	// 10,000 log events per request. You can retrieve up to 100,000 log event results
+	// from a query by paginating with the nextToken .
+	MaxItems *int32
+
+	// The token for the next set of items to return. The token expires after 1 hour.
+	NextToken *string
+
 	noSmithyDocumentSerde
+}
+
+func (v *GetQueryResultsInput) Serialize(s smithy.ShapeSerializer) {
+	s.WriteStruct(schemas.GetQueryResultsRequest)
+	v.SerializeMembers(s)
+	s.CloseStruct()
+}
+
+func (v *GetQueryResultsInput) SerializeMembers(s smithy.ShapeSerializer) {
+	if v.MaxItems != nil {
+		s.WriteInt32(schemas.GetQueryResultsRequest_maxItems, *v.MaxItems)
+	}
+	if v.NextToken != nil {
+		s.WriteString(schemas.GetQueryResultsRequest_nextToken, *v.NextToken)
+	}
+	if v.QueryId != nil {
+		s.WriteString(schemas.GetQueryResultsRequest_queryId, *v.QueryId)
+	}
 }
 
 type GetQueryResultsOutput struct {
@@ -70,6 +101,13 @@ type GetQueryResultsOutput struct {
 	//
 	// [StartQuery]: https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_StartQuery.html
 	EncryptionKey *string
+
+	// If there are more log events remaining in the results, the response includes a
+	// nextToken . You can use this token in a subsequent GetQueryResults request to
+	// get the next set of results. You can retrieve up to 100,000 log event results
+	// from a query by paginating with this token. This is only supported for Logs
+	// Insights QL and is currently not supported for PPL and SQL query languages.
+	NextToken *string
 
 	// The query language used for this query. For more information about the query
 	// languages that CloudWatch Logs supports, see [Supported query languages].
@@ -104,80 +142,85 @@ type GetQueryResultsOutput struct {
 	noSmithyDocumentSerde
 }
 
+func (v *GetQueryResultsOutput) Serialize(s smithy.ShapeSerializer) {
+	s.WriteStruct(schemas.GetQueryResultsResponse)
+	v.SerializeMembers(s)
+	s.CloseStruct()
+}
+
+func (v *GetQueryResultsOutput) SerializeMembers(s smithy.ShapeSerializer) {
+	if v.EncryptionKey != nil {
+		s.WriteString(schemas.GetQueryResultsResponse_encryptionKey, *v.EncryptionKey)
+	}
+	if v.NextToken != nil {
+		s.WriteString(schemas.GetQueryResultsResponse_nextToken, *v.NextToken)
+	}
+	if v.QueryLanguage != "" {
+		s.WriteString(schemas.GetQueryResultsResponse_queryLanguage, string(v.QueryLanguage))
+	}
+	serializeQueryResults(s, schemas.GetQueryResultsResponse_results, v.Results)
+	if v.Statistics != nil {
+		s.WriteStruct(schemas.GetQueryResultsResponse_statistics)
+		v.Statistics.SerializeMembers(s)
+		s.CloseStruct()
+	}
+	if v.Status != "" {
+		s.WriteString(schemas.GetQueryResultsResponse_status, string(v.Status))
+	}
+}
+func (v *GetQueryResultsOutput) Deserialize(d smithy.ShapeDeserializer) error {
+	return smithy.ReadStruct(d, schemas.GetQueryResultsResponse, func(s *smithy.Schema) error {
+		switch s {
+		case schemas.GetQueryResultsResponse_encryptionKey:
+			v.EncryptionKey = new(string)
+			return d.ReadString(schemas.GetQueryResultsResponse_encryptionKey, v.EncryptionKey)
+		case schemas.GetQueryResultsResponse_nextToken:
+			v.NextToken = new(string)
+			return d.ReadString(schemas.GetQueryResultsResponse_nextToken, v.NextToken)
+		case schemas.GetQueryResultsResponse_queryLanguage:
+			var ev string
+			if err := d.ReadString(schemas.GetQueryResultsResponse_queryLanguage, &ev); err != nil {
+				return err
+			}
+			v.QueryLanguage = types.QueryLanguage(ev)
+			return nil
+		case schemas.GetQueryResultsResponse_results:
+			return deserializeQueryResults(d, schemas.GetQueryResultsResponse_results, &v.Results)
+		case schemas.GetQueryResultsResponse_statistics:
+			v.Statistics = &types.QueryStatistics{}
+			return v.Statistics.Deserialize(d)
+		case schemas.GetQueryResultsResponse_status:
+			var ev string
+			if err := d.ReadString(schemas.GetQueryResultsResponse_status, &ev); err != nil {
+				return err
+			}
+			v.Status = types.QueryStatus(ev)
+			return nil
+		}
+		return nil
+	})
+}
 func (c *Client) addOperationGetQueryResultsMiddlewares(stack *middleware.Stack, options Options) (err error) {
-	if err := stack.Serialize.Add(&setOperationInputMiddleware{}, middleware.After); err != nil {
+	if err := stack.Serialize.Add(&serializeRequestMiddleware{options: &options, operationSchema: smithy.NewOperationSchema(schemas.GetQueryResults, schemas.GetQueryResultsRequest, schemas.GetQueryResultsResponse)}, middleware.After); err != nil {
 		return err
 	}
-	err = stack.Serialize.Add(&awsAwsjson11_serializeOpGetQueryResults{}, middleware.After)
-	if err != nil {
+	if err := stack.Deserialize.Add(&deserializeResponseMiddleware{options: &options, operationSchema: smithy.NewOperationSchema(schemas.GetQueryResults, schemas.GetQueryResultsRequest, schemas.GetQueryResultsResponse), output: &GetQueryResultsOutput{}}, middleware.After); err != nil {
 		return err
-	}
-	err = stack.Deserialize.Add(&awsAwsjson11_deserializeOpGetQueryResults{}, middleware.After)
-	if err != nil {
-		return err
-	}
-	if err := addProtocolFinalizerMiddlewares(stack, options, "GetQueryResults"); err != nil {
-		return fmt.Errorf("add protocol finalizers: %v", err)
 	}
 
-	if err = addlegacyEndpointContextSetter(stack, options); err != nil {
-		return err
-	}
-	if err = addSetLoggerMiddleware(stack, options); err != nil {
-		return err
-	}
-	if err = addClientRequestID(stack); err != nil {
-		return err
-	}
-	if err = addComputeContentLength(stack); err != nil {
-		return err
-	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}
 	if err = addComputePayloadSHA256(stack); err != nil {
 		return err
 	}
-	if err = addRetry(stack, options); err != nil {
-		return err
-	}
-	if err = addRawResponseToMetadata(stack); err != nil {
-		return err
-	}
-	if err = addRecordResponseTiming(stack); err != nil {
-		return err
-	}
-	if err = addSpanRetryLoop(stack, options); err != nil {
-		return err
-	}
-	if err = addClientUserAgent(stack, options); err != nil {
-		return err
-	}
-	if err = smithyhttp.AddErrorCloseResponseBodyMiddleware(stack); err != nil {
-		return err
-	}
-	if err = smithyhttp.AddCloseResponseBodyMiddleware(stack); err != nil {
-		return err
-	}
-	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
-		return err
-	}
-	if err = addTimeOffsetBuild(stack, c); err != nil {
-		return err
-	}
-	if err = addUserAgentRetryMode(stack, options); err != nil {
+	if err = addRecordResponseTiming(stack, options); err != nil {
 		return err
 	}
 	if err = addCredentialSource(stack, options); err != nil {
 		return err
 	}
 	if err = addOpGetQueryResultsValidationMiddleware(stack); err != nil {
-		return err
-	}
-	if err = stack.Initialize.Add(newServiceMetadataMiddleware_opGetQueryResults(options.Region), middleware.Before); err != nil {
-		return err
-	}
-	if err = addRecursionDetection(stack); err != nil {
 		return err
 	}
 	if err = addRequestIDRetrieverMiddleware(stack); err != nil {
@@ -192,22 +235,8 @@ func (c *Client) addOperationGetQueryResultsMiddlewares(stack *middleware.Stack,
 	if err = addDisableHTTPSMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = addInterceptBeforeRetryLoop(stack, options); err != nil {
-		return err
-	}
-	if err = addInterceptAttempt(stack, options); err != nil {
-		return err
-	}
 	if err = addInterceptors(stack, options); err != nil {
 		return err
 	}
 	return nil
-}
-
-func newServiceMetadataMiddleware_opGetQueryResults(region string) *awsmiddleware.RegisterServiceMetadata {
-	return &awsmiddleware.RegisterServiceMetadata{
-		Region:        region,
-		ServiceID:     ServiceID,
-		OperationName: "GetQueryResults",
-	}
 }
