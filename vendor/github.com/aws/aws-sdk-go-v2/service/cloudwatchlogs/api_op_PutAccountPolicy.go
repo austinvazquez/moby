@@ -4,17 +4,54 @@ package cloudwatchlogs
 
 import (
 	"context"
-	"fmt"
-	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/schemas"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
+	smithy "github.com/aws/smithy-go"
 	"github.com/aws/smithy-go/middleware"
-	smithyhttp "github.com/aws/smithy-go/transport/http"
 )
 
 // Creates an account-level data protection policy, subscription filter policy,
-// field index policy, transformer policy, or metric extraction policy that applies
-// to all log groups, a subset of log groups, or a data source name and type
-// combination in the account.
+// field index policy, transformer policy, metric extraction policy, or retention
+// policy that applies to all log groups, a subset of log groups, or a data source
+// name and type combination in the account. Account-level policies are
+// Region-specific: a policy applies only to log groups in the Region where you
+// create it. To apply a policy across multiple Regions, create the policy
+// separately in each Region.
+//
+// PutAccountPolicy is an account-wide administrative operation intended for
+// CloudWatch Logs administrators. Because it affects all log groups (or a broad
+// subset) in the account, you should grant logs:PutAccountPolicy permissions only
+// to administrators who manage logging configuration across the account, not to
+// application teams or individual log group owners.
+//
+// # Conflict resolution between account-level and log-group-level policies
+//
+// When both an account-level policy and a log-group-level policy of the same type
+// apply to a log group, the resolution depends on the policy type:
+//
+//   - Data protection — The two policies are cumulative. Any sensitive term
+//     specified in either the account-level or the log-group-level policy is masked.
+//
+//   - Subscription filters — Account-level and log-group-level subscription
+//     filters are additive. A log group can have up to 1 account-level and up to 2
+//     log-group-level subscription filters.
+//
+//   - Transformers — A log-group-level transformer overrides the account-level
+//     transformer. If a log group has its own transformer, it ignores the
+//     account-level transformer policy.
+//
+//   - Field index policies — If a log group has its own field index policy
+//     (created with PutIndexPolicy ), any account-level policy that uses
+//     LogGroupNamePrefix selection criteria or has no selection criteria is ignored
+//     for that log group. However, account-level policies that use DataSourceName
+//     and DataSourceType selection criteria still apply alongside the
+//     log-group-level policy.
+//
+//   - Metric extraction policies — Metric extraction policies are account-level
+//     only and have no log-group-level equivalent, so no conflict resolution applies.
+//
+//   - Retention policies — An account-level retention policy overrides the
+//     retention setting of the log group.
 //
 // For field index policies, you can configure indexed fields as facets to enable
 // interactive exploration of your logs. Facets provide value distributions and
@@ -41,6 +78,10 @@ import (
 //
 //   - To create a metric extraction policy, you must have the
 //     logs:PutMetricExtractionPolicy and logs:PutAccountPolicy permissions.
+//
+//   - To create a retention policy, you must have the logs:PutRetentionPolicy and
+//     logs:PutAccountPolicy permissions. A dry run requires the same permissions as
+//     the operation that it previews, and no additional permissions.
 //
 // # Data protection policy
 //
@@ -291,11 +332,11 @@ import (
 // When a policy disables EMF metric creation for a log group, log events in the
 // EMF format are still ingested, but no CloudWatch Metrics are created from them.
 //
-// Creating a policy disables metrics for AWS features that use EMF to create
-// metrics, such as CloudWatch Container Insights and CloudWatch Application
-// Signals. To prevent turning off those features by accident, we recommend that
-// you exclude the underlying log-groups through a selection-criteria such as
-// LogGroupNamePrefix NOT IN ["/aws/containerinsights",
+// Creating a policy disables metrics for Amazon Web Services features that use
+// EMF to create metrics, such as CloudWatch Container Insights and CloudWatch
+// Application Signals. To prevent turning off those features by accident, we
+// recommend that you exclude the underlying log-groups through a
+// selection-criteria such as LogGroupNamePrefix NOT IN ["/aws/containerinsights",
 // "/aws/ecs/containerinsights", "/aws/application-signals/data"] .
 //
 // Each account can have either one account-level metric extraction policy that
@@ -334,12 +375,58 @@ import (
 //     IN policy for prefix "/aws" because the set of log groups matching "/aws" is
 //     not a subset of the log groups matching "/aws/lambda" .
 //
+// # Retention policy
+//
+// A retention policy sets the retention period for log groups in your account.
+// You can use an account-level retention policy to set a default retention period
+// for all log groups in the account, or for a subset of log groups that you
+// specify with the selectionCriteria parameter. CloudWatch Logs automatically
+// deletes log events that are older than the retention period.
+//
+// Each account can have up to 20 account-level retention policies in each Region.
+// To scope a retention policy to a subset of log groups, use LogGroupNamePrefix
+// in selectionCriteria . Retention policies support log group name prefixes only.
+// If you omit selectionCriteria , the policy applies to all log groups in the
+// account.
+//
+// Unlike other account-level policy types, retention policies can have
+// overlapping selection criteria. When more than one retention policy applies to a
+// log group, the policy with the longest retention period is used. A policy that
+// specifies NEVER_EXPIRE is treated as the longest retention period. This lets
+// you set a baseline retention period for the account, apply longer retention
+// periods to specific log groups, and exempt specific log groups from expiring at
+// all. If two policies that apply to the same log group specify the same retention
+// period, the policy that was created first is the one reported in
+// retentionPolicyName .
+//
+// Account-level retention policies require a minimum retention period of 30 days.
+//
+// A retention policy takes effect 24 hours after you create it. If you update a
+// policy, the new retention period takes effect 24 hours after the update, and the
+// previous retention period stays in effect until then. During this period,
+// DescribeLogGroups and log event expiration use the retention period that is
+// currently in effect, but a dry run reports the impact as if the policy were
+// already in effect.
+//
+// Before you create, update, or delete a retention policy, you can specify true
+// for dryRun to preview how many log groups would have a longer, shorter, or
+// unchanged retention period. For more information, see [DryRunResult].
+//
+// An account-level retention policy replaces the retention period set on a log
+// group, including when the log group's own retention period is longer. For
+// example, if a log group is set to retain log events for 10 years and you create
+// a retention policy that sets a 90-day retention period for that log group,
+// CloudWatch Logs deletes the log events in that log group that are older than 90
+// days. Specify true for dryRun to see which log groups would have a shorter
+// retention period before you create or update the policy.
+//
 // [PutDestination]: https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_PutDestination.html
 // [PutTransformer]: https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_PutTransformer.html
 // [GetLogFields]: https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_GetLogFields.html
 // [PutDataProtectionPolicy]: https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_PutDataProtectionPolicy.html
 // [FilterLogEvents]: https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_FilterLogEvents.html
 // [Processors that you can use]: https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatch-Logs-Transformation.html#CloudWatch-Logs-Transformation-Processors
+// [DryRunResult]: https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_DryRunResult.html
 // [GetLogEvents]: https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_GetLogEvents.html
 // [field index quota]: https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatchLogs-Field-Indexing-Syntax
 // [PutIndexPolicy]: https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_PutIndexPolicy.html
@@ -461,6 +548,29 @@ type PutAccountPolicyInput struct {
 	// FIELD_INDEX and FACET . Field names within Fields and FieldsV2 must be mutually
 	// exclusive.
 	//
+	// Retention policy
+	//
+	// A retention policy must include the following attributes in a JSON block:
+	//
+	// retentionInDays The number of days to retain log events. Valid values are 30,
+	// 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288,
+	// and 3653. To retain log events indefinitely, specify the string NEVER_EXPIRE .
+	//
+	// enforcementMode Specifies which log groups the policy applies to. Valid values
+	// are NEW_ONLY and RETROACTIVE .
+	//
+	// RETROACTIVE applies the policy to every log group that matches the selection
+	// criteria, including log groups that existed before you created the policy.
+	//
+	// NEW_ONLY applies the policy only to log groups that are created after you
+	// create the policy. Log groups that already existed when you created the policy
+	// keep their own retention period.
+	//
+	// The following is an example of a retention policy document.
+	//
+	//     "policyDocument": "{\"retentionInDays\": 90, \"enforcementMode\":
+	//     \"RETROACTIVE\"}"
+	//
 	// [PutDestination]: https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_PutDestination.html
 	// [Processors that you can use]: https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatch-Logs-Transformation.html#CloudWatch-Logs-Transformation-Processors
 	// [Types of data that you can mask]: https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/mask-sensitive-log-data-types.html
@@ -479,6 +589,15 @@ type PutAccountPolicyInput struct {
 	// This member is required.
 	PolicyType types.PolicyType
 
+	// Specifies whether to preview the impact of the policy without creating or
+	// updating it. If you specify true , CloudWatch Logs validates the request, does
+	// not save the policy, and returns the estimated impact in dryRunResult instead
+	// of accountPolicy . The default is false .
+	//
+	// Specifying dryRun is valid only when you specify RETENTION_POLICY for policyType
+	// . Only one dry run can be in progress for an account at a time.
+	DryRun bool
+
 	// Currently the only valid value for this parameter is ALL , which specifies that
 	// the data protection policy applies to all log groups in the account. If you omit
 	// this parameter, the default of ALL is used.
@@ -488,8 +607,8 @@ type PutAccountPolicyInput struct {
 	// account or a data source name and type combination.
 	//
 	// Specifying selectionCriteria is valid only when you specify
-	// SUBSCRIPTION_FILTER_POLICY , FIELD_INDEX_POLICY or TRANSFORMER_POLICY for
-	// policyType .
+	// SUBSCRIPTION_FILTER_POLICY , FIELD_INDEX_POLICY , TRANSFORMER_POLICY , or
+	// RETENTION_POLICY for policyType .
 	//
 	//   - If policyType is SUBSCRIPTION_FILTER_POLICY , the only supported
 	//   selectionCriteria filter is LogGroupName NOT IN []
@@ -507,6 +626,10 @@ type PutAccountPolicyInput struct {
 	// When you specify selectionCriteria for a field index policy you can use either
 	//   LogGroupNamePrefix by itself or DataSourceName and DataSourceType together.
 	//
+	//   - If policyType is RETENTION_POLICY , the only supported selectionCriteria
+	//   filter is LogGroupNamePrefix . If you omit selectionCriteria , the retention
+	//   policy applies to all log groups in the account.
+	//
 	// The selectionCriteria string can be up to 25KB in length. The length is
 	// determined by using its UTF-8 bytes.
 	//
@@ -519,10 +642,41 @@ type PutAccountPolicyInput struct {
 	noSmithyDocumentSerde
 }
 
+func (v *PutAccountPolicyInput) Serialize(s smithy.ShapeSerializer) {
+	s.WriteStruct(schemas.PutAccountPolicyRequest)
+	v.SerializeMembers(s)
+	s.CloseStruct()
+}
+
+func (v *PutAccountPolicyInput) SerializeMembers(s smithy.ShapeSerializer) {
+	if v.DryRun != false {
+		s.WriteBool(schemas.PutAccountPolicyRequest_dryRun, v.DryRun)
+	}
+	if v.PolicyDocument != nil {
+		s.WriteString(schemas.PutAccountPolicyRequest_policyDocument, *v.PolicyDocument)
+	}
+	if v.PolicyName != nil {
+		s.WriteString(schemas.PutAccountPolicyRequest_policyName, *v.PolicyName)
+	}
+	if v.PolicyType != "" {
+		s.WriteString(schemas.PutAccountPolicyRequest_policyType, string(v.PolicyType))
+	}
+	if v.Scope != "" {
+		s.WriteString(schemas.PutAccountPolicyRequest_scope, string(v.Scope))
+	}
+	if v.SelectionCriteria != nil {
+		s.WriteString(schemas.PutAccountPolicyRequest_selectionCriteria, *v.SelectionCriteria)
+	}
+}
+
 type PutAccountPolicyOutput struct {
 
 	// The account policy that you created.
 	AccountPolicy *types.AccountPolicy
+
+	// The estimated impact of the policy on log groups in the account. This field is
+	// returned only when the request specifies dryRun as true .
+	DryRunResult *types.DryRunResult
 
 	// Metadata pertaining to the operation's result.
 	ResultMetadata middleware.Metadata
@@ -530,80 +684,58 @@ type PutAccountPolicyOutput struct {
 	noSmithyDocumentSerde
 }
 
+func (v *PutAccountPolicyOutput) Serialize(s smithy.ShapeSerializer) {
+	s.WriteStruct(schemas.PutAccountPolicyResponse)
+	v.SerializeMembers(s)
+	s.CloseStruct()
+}
+
+func (v *PutAccountPolicyOutput) SerializeMembers(s smithy.ShapeSerializer) {
+	if v.AccountPolicy != nil {
+		s.WriteStruct(schemas.PutAccountPolicyResponse_accountPolicy)
+		v.AccountPolicy.SerializeMembers(s)
+		s.CloseStruct()
+	}
+	if v.DryRunResult != nil {
+		s.WriteStruct(schemas.PutAccountPolicyResponse_dryRunResult)
+		v.DryRunResult.SerializeMembers(s)
+		s.CloseStruct()
+	}
+}
+func (v *PutAccountPolicyOutput) Deserialize(d smithy.ShapeDeserializer) error {
+	return smithy.ReadStruct(d, schemas.PutAccountPolicyResponse, func(s *smithy.Schema) error {
+		switch s {
+		case schemas.PutAccountPolicyResponse_accountPolicy:
+			v.AccountPolicy = &types.AccountPolicy{}
+			return v.AccountPolicy.Deserialize(d)
+		case schemas.PutAccountPolicyResponse_dryRunResult:
+			v.DryRunResult = &types.DryRunResult{}
+			return v.DryRunResult.Deserialize(d)
+		}
+		return nil
+	})
+}
 func (c *Client) addOperationPutAccountPolicyMiddlewares(stack *middleware.Stack, options Options) (err error) {
-	if err := stack.Serialize.Add(&setOperationInputMiddleware{}, middleware.After); err != nil {
+	if err := stack.Serialize.Add(&serializeRequestMiddleware{options: &options, operationSchema: smithy.NewOperationSchema(schemas.PutAccountPolicy, schemas.PutAccountPolicyRequest, schemas.PutAccountPolicyResponse)}, middleware.After); err != nil {
 		return err
 	}
-	err = stack.Serialize.Add(&awsAwsjson11_serializeOpPutAccountPolicy{}, middleware.After)
-	if err != nil {
+	if err := stack.Deserialize.Add(&deserializeResponseMiddleware{options: &options, operationSchema: smithy.NewOperationSchema(schemas.PutAccountPolicy, schemas.PutAccountPolicyRequest, schemas.PutAccountPolicyResponse), output: &PutAccountPolicyOutput{}}, middleware.After); err != nil {
 		return err
-	}
-	err = stack.Deserialize.Add(&awsAwsjson11_deserializeOpPutAccountPolicy{}, middleware.After)
-	if err != nil {
-		return err
-	}
-	if err := addProtocolFinalizerMiddlewares(stack, options, "PutAccountPolicy"); err != nil {
-		return fmt.Errorf("add protocol finalizers: %v", err)
 	}
 
-	if err = addlegacyEndpointContextSetter(stack, options); err != nil {
-		return err
-	}
-	if err = addSetLoggerMiddleware(stack, options); err != nil {
-		return err
-	}
-	if err = addClientRequestID(stack); err != nil {
-		return err
-	}
-	if err = addComputeContentLength(stack); err != nil {
-		return err
-	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}
 	if err = addComputePayloadSHA256(stack); err != nil {
 		return err
 	}
-	if err = addRetry(stack, options); err != nil {
-		return err
-	}
-	if err = addRawResponseToMetadata(stack); err != nil {
-		return err
-	}
-	if err = addRecordResponseTiming(stack); err != nil {
-		return err
-	}
-	if err = addSpanRetryLoop(stack, options); err != nil {
-		return err
-	}
-	if err = addClientUserAgent(stack, options); err != nil {
-		return err
-	}
-	if err = smithyhttp.AddErrorCloseResponseBodyMiddleware(stack); err != nil {
-		return err
-	}
-	if err = smithyhttp.AddCloseResponseBodyMiddleware(stack); err != nil {
-		return err
-	}
-	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
-		return err
-	}
-	if err = addTimeOffsetBuild(stack, c); err != nil {
-		return err
-	}
-	if err = addUserAgentRetryMode(stack, options); err != nil {
+	if err = addRecordResponseTiming(stack, options); err != nil {
 		return err
 	}
 	if err = addCredentialSource(stack, options); err != nil {
 		return err
 	}
 	if err = addOpPutAccountPolicyValidationMiddleware(stack); err != nil {
-		return err
-	}
-	if err = stack.Initialize.Add(newServiceMetadataMiddleware_opPutAccountPolicy(options.Region), middleware.Before); err != nil {
-		return err
-	}
-	if err = addRecursionDetection(stack); err != nil {
 		return err
 	}
 	if err = addRequestIDRetrieverMiddleware(stack); err != nil {
@@ -618,22 +750,8 @@ func (c *Client) addOperationPutAccountPolicyMiddlewares(stack *middleware.Stack
 	if err = addDisableHTTPSMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = addInterceptBeforeRetryLoop(stack, options); err != nil {
-		return err
-	}
-	if err = addInterceptAttempt(stack, options); err != nil {
-		return err
-	}
 	if err = addInterceptors(stack, options); err != nil {
 		return err
 	}
 	return nil
-}
-
-func newServiceMetadataMiddleware_opPutAccountPolicy(region string) *awsmiddleware.RegisterServiceMetadata {
-	return &awsmiddleware.RegisterServiceMetadata{
-		Region:        region,
-		ServiceID:     ServiceID,
-		OperationName: "PutAccountPolicy",
-	}
 }
