@@ -5,15 +5,19 @@ package cloudwatchlogs
 import (
 	"context"
 	"fmt"
-	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/schemas"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
+	smithy "github.com/aws/smithy-go"
 	"github.com/aws/smithy-go/middleware"
-	smithyhttp "github.com/aws/smithy-go/transport/http"
 )
 
 // Returns information about log groups, including data sources that ingest into
 // each log group. You can return all your log groups or filter the results by
 // prefix. The results are ASCII-sorted by log group name.
+//
+// If an account-level retention policy applies to a log group, retentionInDays
+// shows the retention period from that policy, and retentionPolicyName shows the
+// name of the policy.
 //
 // CloudWatch Logs doesn't support IAM policies that control access to the
 // DescribeLogGroups action by using the aws:ResourceTag/key-name  condition key.
@@ -67,12 +71,18 @@ type DescribeLogGroupsInput struct {
 	// specified log group class. If you omit this parameter, log groups of all classes
 	// can be returned.
 	//
-	// Specifies the log group class for this log group. There are three classes:
+	// If you specify either INFREQUENT_ACCESS or ESSENTIALS , the results include log
+	// groups in both the Infrequent Access and Essentials log classes.
+	//
+	// Specifies the log group class for this log group. There are four classes:
 	//
 	//   - The Standard log class supports all CloudWatch Logs features.
 	//
 	//   - The Infrequent Access log class supports a subset of CloudWatch Logs
 	//   features and incurs lower costs.
+	//
+	//   - The Essentials log class supports a subset of CloudWatch Logs features and
+	//   incurs lower costs.
 	//
 	//   - Use the Delivery log class only for delivering Lambda logs to store in
 	//   Amazon S3 or Amazon Data Firehose. Log events in log groups in the Delivery
@@ -121,6 +131,39 @@ type DescribeLogGroupsInput struct {
 	noSmithyDocumentSerde
 }
 
+func (v *DescribeLogGroupsInput) Serialize(s smithy.ShapeSerializer) {
+	s.WriteStruct(schemas.DescribeLogGroupsRequest)
+	v.SerializeMembers(s)
+	s.CloseStruct()
+}
+
+func (v *DescribeLogGroupsInput) SerializeMembers(s smithy.ShapeSerializer) {
+	if v.AccountIdentifiers != nil {
+		serializeAccountIds(s, schemas.DescribeLogGroupsRequest_accountIdentifiers, v.AccountIdentifiers)
+	}
+	if v.IncludeLinkedAccounts != nil {
+		s.WriteBool(schemas.DescribeLogGroupsRequest_includeLinkedAccounts, *v.IncludeLinkedAccounts)
+	}
+	if v.Limit != nil {
+		s.WriteInt32(schemas.DescribeLogGroupsRequest_limit, *v.Limit)
+	}
+	if v.LogGroupClass != "" {
+		s.WriteString(schemas.DescribeLogGroupsRequest_logGroupClass, string(v.LogGroupClass))
+	}
+	if v.LogGroupIdentifiers != nil {
+		serializeDescribeLogGroupsLogGroupIdentifiers(s, schemas.DescribeLogGroupsRequest_logGroupIdentifiers, v.LogGroupIdentifiers)
+	}
+	if v.LogGroupNamePattern != nil {
+		s.WriteString(schemas.DescribeLogGroupsRequest_logGroupNamePattern, *v.LogGroupNamePattern)
+	}
+	if v.LogGroupNamePrefix != nil {
+		s.WriteString(schemas.DescribeLogGroupsRequest_logGroupNamePrefix, *v.LogGroupNamePrefix)
+	}
+	if v.NextToken != nil {
+		s.WriteString(schemas.DescribeLogGroupsRequest_nextToken, *v.NextToken)
+	}
+}
+
 type DescribeLogGroupsOutput struct {
 
 	// An array of structures, where each structure contains the information about one
@@ -136,77 +179,50 @@ type DescribeLogGroupsOutput struct {
 	noSmithyDocumentSerde
 }
 
+func (v *DescribeLogGroupsOutput) Serialize(s smithy.ShapeSerializer) {
+	s.WriteStruct(schemas.DescribeLogGroupsResponse)
+	v.SerializeMembers(s)
+	s.CloseStruct()
+}
+
+func (v *DescribeLogGroupsOutput) SerializeMembers(s smithy.ShapeSerializer) {
+	if v.LogGroups != nil {
+		serializeLogGroups(s, schemas.DescribeLogGroupsResponse_logGroups, v.LogGroups)
+	}
+	if v.NextToken != nil {
+		s.WriteString(schemas.DescribeLogGroupsResponse_nextToken, *v.NextToken)
+	}
+}
+func (v *DescribeLogGroupsOutput) Deserialize(d smithy.ShapeDeserializer) error {
+	return smithy.ReadStruct(d, schemas.DescribeLogGroupsResponse, func(s *smithy.Schema) error {
+		switch s {
+		case schemas.DescribeLogGroupsResponse_logGroups:
+			return deserializeLogGroups(d, schemas.DescribeLogGroupsResponse_logGroups, &v.LogGroups)
+		case schemas.DescribeLogGroupsResponse_nextToken:
+			v.NextToken = new(string)
+			return d.ReadString(schemas.DescribeLogGroupsResponse_nextToken, v.NextToken)
+		}
+		return nil
+	})
+}
 func (c *Client) addOperationDescribeLogGroupsMiddlewares(stack *middleware.Stack, options Options) (err error) {
-	if err := stack.Serialize.Add(&setOperationInputMiddleware{}, middleware.After); err != nil {
+	if err := stack.Serialize.Add(&serializeRequestMiddleware{options: &options, operationSchema: smithy.NewOperationSchema(schemas.DescribeLogGroups, schemas.DescribeLogGroupsRequest, schemas.DescribeLogGroupsResponse)}, middleware.After); err != nil {
 		return err
 	}
-	err = stack.Serialize.Add(&awsAwsjson11_serializeOpDescribeLogGroups{}, middleware.After)
-	if err != nil {
+	if err := stack.Deserialize.Add(&deserializeResponseMiddleware{options: &options, operationSchema: smithy.NewOperationSchema(schemas.DescribeLogGroups, schemas.DescribeLogGroupsRequest, schemas.DescribeLogGroupsResponse), output: &DescribeLogGroupsOutput{}}, middleware.After); err != nil {
 		return err
-	}
-	err = stack.Deserialize.Add(&awsAwsjson11_deserializeOpDescribeLogGroups{}, middleware.After)
-	if err != nil {
-		return err
-	}
-	if err := addProtocolFinalizerMiddlewares(stack, options, "DescribeLogGroups"); err != nil {
-		return fmt.Errorf("add protocol finalizers: %v", err)
 	}
 
-	if err = addlegacyEndpointContextSetter(stack, options); err != nil {
-		return err
-	}
-	if err = addSetLoggerMiddleware(stack, options); err != nil {
-		return err
-	}
-	if err = addClientRequestID(stack); err != nil {
-		return err
-	}
-	if err = addComputeContentLength(stack); err != nil {
-		return err
-	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}
 	if err = addComputePayloadSHA256(stack); err != nil {
 		return err
 	}
-	if err = addRetry(stack, options); err != nil {
-		return err
-	}
-	if err = addRawResponseToMetadata(stack); err != nil {
-		return err
-	}
-	if err = addRecordResponseTiming(stack); err != nil {
-		return err
-	}
-	if err = addSpanRetryLoop(stack, options); err != nil {
-		return err
-	}
-	if err = addClientUserAgent(stack, options); err != nil {
-		return err
-	}
-	if err = smithyhttp.AddErrorCloseResponseBodyMiddleware(stack); err != nil {
-		return err
-	}
-	if err = smithyhttp.AddCloseResponseBodyMiddleware(stack); err != nil {
-		return err
-	}
-	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
-		return err
-	}
-	if err = addTimeOffsetBuild(stack, c); err != nil {
-		return err
-	}
-	if err = addUserAgentRetryMode(stack, options); err != nil {
+	if err = addRecordResponseTiming(stack, options); err != nil {
 		return err
 	}
 	if err = addCredentialSource(stack, options); err != nil {
-		return err
-	}
-	if err = stack.Initialize.Add(newServiceMetadataMiddleware_opDescribeLogGroups(options.Region), middleware.Before); err != nil {
-		return err
-	}
-	if err = addRecursionDetection(stack); err != nil {
 		return err
 	}
 	if err = addRequestIDRetrieverMiddleware(stack); err != nil {
@@ -219,12 +235,6 @@ func (c *Client) addOperationDescribeLogGroupsMiddlewares(stack *middleware.Stac
 		return err
 	}
 	if err = addDisableHTTPSMiddleware(stack, options); err != nil {
-		return err
-	}
-	if err = addInterceptBeforeRetryLoop(stack, options); err != nil {
-		return err
-	}
-	if err = addInterceptAttempt(stack, options); err != nil {
 		return err
 	}
 	if err = addInterceptors(stack, options); err != nil {
@@ -326,11 +336,3 @@ type DescribeLogGroupsAPIClient interface {
 }
 
 var _ DescribeLogGroupsAPIClient = (*Client)(nil)
-
-func newServiceMetadataMiddleware_opDescribeLogGroups(region string) *awsmiddleware.RegisterServiceMetadata {
-	return &awsmiddleware.RegisterServiceMetadata{
-		Region:        region,
-		ServiceID:     ServiceID,
-		OperationName: "DescribeLogGroups",
-	}
-}

@@ -5,8 +5,9 @@ package cloudwatchlogs
 import (
 	"context"
 	"fmt"
-	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/schemas"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
+	smithy "github.com/aws/smithy-go"
 	"github.com/aws/smithy-go/middleware"
 	smithysync "github.com/aws/smithy-go/sync"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
@@ -25,6 +26,15 @@ import (
 // original JSON structure where the large field was located. For example, this
 // could be @ptr.$['input']['message'] , @ptr.$['AAA']['BBB']['CCC']['DDD'] ,
 // @ptr.$['AAA'] , or any other path matching your log structure.
+//
+// The GetLogObject API routes requests using SDK host prefix injection. SDK
+// versions released before April 1, 2026 route to
+// streaming-logs.Region.amazonaws.com , which does not support VPC endpoints. SDK
+// versions released on or after April 1, 2026 route to
+// stream-logs.Region.amazonaws.com , which supports VPC endpoints. To set up a VPC
+// endpoint for this API, see [Creating a VPC endpoint for CloudWatch Logs].
+//
+// [Creating a VPC endpoint for CloudWatch Logs]: https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/cloudwatch-logs-and-interface-VPC.html#create-VPC-endpoint-for-CloudWatchLogs
 func (c *Client) GetLogObject(ctx context.Context, params *GetLogObjectInput, optFns ...func(*Options)) (*GetLogObjectOutput, error) {
 	if params == nil {
 		params = &GetLogObjectInput{}
@@ -58,6 +68,21 @@ type GetLogObjectInput struct {
 	noSmithyDocumentSerde
 }
 
+func (v *GetLogObjectInput) Serialize(s smithy.ShapeSerializer) {
+	s.WriteStruct(schemas.GetLogObjectRequest)
+	v.SerializeMembers(s)
+	s.CloseStruct()
+}
+
+func (v *GetLogObjectInput) SerializeMembers(s smithy.ShapeSerializer) {
+	if v.LogObjectPointer != nil {
+		s.WriteString(schemas.GetLogObjectRequest_logObjectPointer, *v.LogObjectPointer)
+	}
+	if v.Unmask != false {
+		s.WriteBool(schemas.GetLogObjectRequest_unmask, v.Unmask)
+	}
+}
+
 // The response from the GetLogObject operation.
 type GetLogObjectOutput struct {
 	eventStream *GetLogObjectEventStream
@@ -68,70 +93,45 @@ type GetLogObjectOutput struct {
 	noSmithyDocumentSerde
 }
 
+func (v *GetLogObjectOutput) Serialize(s smithy.ShapeSerializer) {
+	s.WriteStruct(schemas.GetLogObjectResponse)
+	v.SerializeMembers(s)
+	s.CloseStruct()
+}
+
+func (v *GetLogObjectOutput) SerializeMembers(s smithy.ShapeSerializer) {
+}
+func (v *GetLogObjectOutput) Deserialize(d smithy.ShapeDeserializer) error {
+	return smithy.ReadStruct(d, schemas.GetLogObjectResponse, func(s *smithy.Schema) error {
+		switch s {
+		}
+		return nil
+	})
+}
+
 // GetStream returns the type to interact with the event stream.
 func (o *GetLogObjectOutput) GetStream() *GetLogObjectEventStream {
 	return o.eventStream
 }
 
 func (c *Client) addOperationGetLogObjectMiddlewares(stack *middleware.Stack, options Options) (err error) {
-	if err := stack.Serialize.Add(&setOperationInputMiddleware{}, middleware.After); err != nil {
+	if err := stack.Serialize.Add(&serializeRequestMiddleware{options: &options, operationSchema: smithy.NewOperationSchema(schemas.GetLogObject, schemas.GetLogObjectRequest, schemas.GetLogObjectResponse)}, middleware.After); err != nil {
 		return err
 	}
-	err = stack.Serialize.Add(&awsAwsjson11_serializeOpGetLogObject{}, middleware.After)
-	if err != nil {
+	if err := stack.Deserialize.Add(&deserializeResponseMiddleware{options: &options, operationSchema: smithy.NewOperationSchema(schemas.GetLogObject, schemas.GetLogObjectRequest, schemas.GetLogObjectResponse), output: &GetLogObjectOutput{}}, middleware.After); err != nil {
 		return err
 	}
-	err = stack.Deserialize.Add(&awsAwsjson11_deserializeOpGetLogObject{}, middleware.After)
-	if err != nil {
+	if err := stack.Deserialize.Insert(&deserializeOpEventStreamGetLogObject{options: &options}, "OperationDeserializer", middleware.Before); err != nil {
 		return err
-	}
-	if err := addProtocolFinalizerMiddlewares(stack, options, "GetLogObject"); err != nil {
-		return fmt.Errorf("add protocol finalizers: %v", err)
 	}
 
-	if err = addlegacyEndpointContextSetter(stack, options); err != nil {
-		return err
-	}
-	if err = addEventStreamGetLogObjectMiddleware(stack, options); err != nil {
-		return err
-	}
-	if err = addSetLoggerMiddleware(stack, options); err != nil {
-		return err
-	}
-	if err = addClientRequestID(stack); err != nil {
-		return err
-	}
-	if err = addComputeContentLength(stack); err != nil {
-		return err
-	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}
 	if err = addComputePayloadSHA256(stack); err != nil {
 		return err
 	}
-	if err = addRetry(stack, options); err != nil {
-		return err
-	}
-	if err = addRawResponseToMetadata(stack); err != nil {
-		return err
-	}
-	if err = addRecordResponseTiming(stack); err != nil {
-		return err
-	}
-	if err = addSpanRetryLoop(stack, options); err != nil {
-		return err
-	}
-	if err = addClientUserAgent(stack, options); err != nil {
-		return err
-	}
-	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
-		return err
-	}
-	if err = addTimeOffsetBuild(stack, c); err != nil {
-		return err
-	}
-	if err = addUserAgentRetryMode(stack, options); err != nil {
+	if err = addRecordResponseTiming(stack, options); err != nil {
 		return err
 	}
 	if err = addCredentialSource(stack, options); err != nil {
@@ -141,12 +141,6 @@ func (c *Client) addOperationGetLogObjectMiddlewares(stack *middleware.Stack, op
 		return err
 	}
 	if err = addOpGetLogObjectValidationMiddleware(stack); err != nil {
-		return err
-	}
-	if err = stack.Initialize.Add(newServiceMetadataMiddleware_opGetLogObject(options.Region), middleware.Before); err != nil {
-		return err
-	}
-	if err = addRecursionDetection(stack); err != nil {
 		return err
 	}
 	if err = addRequestIDRetrieverMiddleware(stack); err != nil {
@@ -159,12 +153,6 @@ func (c *Client) addOperationGetLogObjectMiddlewares(stack *middleware.Stack, op
 		return err
 	}
 	if err = addDisableHTTPSMiddleware(stack, options); err != nil {
-		return err
-	}
-	if err = addInterceptBeforeRetryLoop(stack, options); err != nil {
-		return err
-	}
-	if err = addInterceptAttempt(stack, options); err != nil {
 		return err
 	}
 	if err = addInterceptors(stack, options); err != nil {
@@ -192,20 +180,12 @@ func (m *endpointPrefix_opGetLogObjectMiddleware) HandleFinalize(ctx context.Con
 		return out, metadata, fmt.Errorf("unknown transport type %T", in.Request)
 	}
 
-	req.URL.Host = "streaming-" + req.URL.Host
+	req.URL.Host = "stream-" + req.URL.Host
 
 	return next.HandleFinalize(ctx, in)
 }
 func addEndpointPrefix_opGetLogObjectMiddleware(stack *middleware.Stack) error {
 	return stack.Finalize.Insert(&endpointPrefix_opGetLogObjectMiddleware{}, "ResolveEndpointV2", middleware.After)
-}
-
-func newServiceMetadataMiddleware_opGetLogObject(region string) *awsmiddleware.RegisterServiceMetadata {
-	return &awsmiddleware.RegisterServiceMetadata{
-		Region:        region,
-		ServiceID:     ServiceID,
-		OperationName: "GetLogObject",
-	}
 }
 
 // GetLogObjectEventStream provides the event stream handling for the GetLogObject operation.
