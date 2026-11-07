@@ -49,8 +49,10 @@ import (
 )
 
 const (
-	labelSnapshotRef = "containerd.io/snapshot.ref"
-	unpackSpanPrefix = "pkg.unpack.unpacker"
+	labelSnapshotRef    = "containerd.io/snapshot.ref"
+	labelSnapshotParent = "containerd.io/snapshot/parent-chain-id"
+	labelSnapshotDiffID = "containerd.io/snapshot/diff-id"
+	unpackSpanPrefix    = "pkg.unpack.unpacker"
 )
 
 // Result returns information about the unpacks which were completed.
@@ -65,8 +67,7 @@ type unpackerConfig struct {
 
 	limiter               Limiter
 	duplicationSuppressor KeyedLocker
-
-	unpackLimiter Limiter
+	unpackLimiter         Limiter
 }
 
 // Platform represents a platform-specific unpack configuration which includes
@@ -194,8 +195,18 @@ func NewUnpacker(ctx context.Context, cs content.Store, opts ...UnpackerOpt) (*U
 // process will be started in a goroutine.
 func (u *Unpacker) Unpack(h images.Handler) images.Handler {
 	var (
-		lock   sync.Mutex
-		layers = map[digest.Digest][]ocispec.Descriptor{}
+		lock sync.Mutex
+		// Maps a config's digest to the layer descriptors of each manifest
+		// that names it, one slice per manifest. Layers cannot be unpacked
+		// until the diffIDs are known from the config. Manifests can share a
+		// config (compression variants of one image have identical diffIDs
+		// and so identical configs), which is why one digest can hold the
+		// layers of several manifests.
+		queuedLayers = map[digest.Digest][][]ocispec.Descriptor{}
+		// Maps a config's digest to the layer descriptors selected for unpack.
+		// Once these layers are queued for fetch, the value is set to nil. The key
+		// remains to prevent scheduling another unpack.
+		unpackedLayers = map[digest.Digest][]ocispec.Descriptor{}
 	)
 
 	var layerTypes map[string]bool
@@ -249,20 +260,53 @@ func (u *Unpacker) Unpack(h images.Handler) images.Handler {
 				}
 			}
 
+			if len(manifestLayers) == 0 {
+				return nonLayers, nil
+			}
+
 			lock.Lock()
 			for _, nl := range nonLayers {
-				layers[nl.Digest] = manifestLayers
+				if images.IsConfigType(nl.MediaType) || configTypes[nl.MediaType] {
+					queuedLayers[nl.Digest] = append(queuedLayers[nl.Digest], manifestLayers)
+				}
 			}
 			lock.Unlock()
 
 			children = nonLayers
 		} else if images.IsConfigType(desc.MediaType) || configTypes[desc.MediaType] {
 			lock.Lock()
-			l := layers[desc.Digest]
+			queued := queuedLayers[desc.Digest]
+			delete(queuedLayers, desc.Digest)
+			// Because manifests that share the same config unpack to the same
+			// snapshot chain, we only need to unpack the layers for one
+			// manifest. The layers for any remaining manifests sharing that
+			// config are still fetched to ensure they make it in the content
+			// store.
+			var first []ocispec.Descriptor
+			unpacked, ok := unpackedLayers[desc.Digest]
+			if !ok && len(queued) > 0 {
+				first, queued = queued[0], queued[1:]
+				unpacked = first
+				unpackedLayers[desc.Digest] = first
+			}
+			// Unpack may skip fetching layers whose snapshots already exist.
+			// If another manifest shares this config, explicitly fetch the first
+			// manifest's layers too so every manifest's blobs reach the content
+			// store. For a config used by only one manifest, leave fetching to
+			// unpack.
+			if len(queued) > 0 && len(unpacked) > 0 {
+				queued = append(queued, unpacked)
+				unpackedLayers[desc.Digest] = nil
+			}
 			lock.Unlock()
-			if len(l) > 0 {
+			if len(first) > 0 {
 				u.eg.Go(func() error {
-					return u.unpack(h, desc, l)
+					return u.unpack(h, desc, first)
+				})
+			}
+			for _, layers := range queued {
+				u.eg.Go(func() error {
+					return u.fetch(u.ctx, h, layers, nil)
 				})
 			}
 		}
@@ -397,6 +441,10 @@ func (u *Unpacker) unpack(
 			snapshotLabels = make(map[string]string)
 		}
 		snapshotLabels[labelSnapshotRef] = chainID
+		snapshotLabels[labelSnapshotDiffID] = diffIDs[i].String()
+		if i > 0 {
+			snapshotLabels[labelSnapshotParent] = chainIDs[i-1].String()
+		}
 
 		var (
 			key    string
@@ -410,13 +458,14 @@ func (u *Unpacker) unpack(
 			mounts, err = sn.Prepare(ctx, key, parent, opts...)
 			if err != nil {
 				if errdefs.IsAlreadyExists(err) {
-					if _, err := sn.Stat(ctx, chainID); err != nil {
+					if snInfo, err := sn.Stat(ctx, chainID); err != nil {
 						if !errdefs.IsNotFound(err) {
 							return nil, fmt.Errorf("failed to stat snapshot %s: %w", chainID, err)
 						}
 						// Try again, this should be rare, log it
 						log.G(ctx).WithField("key", key).WithField("chainid", chainID).Debug("extraction snapshot already exists, chain id not found")
 					} else {
+						log.G(ctx).Debugf("snapshot %s with chainID %s already exists skip fetch blob %q ", snInfo.Name, chainID, desc.Digest)
 						// no need to handle, snapshot now found with chain id
 						return nil, nil
 					}
@@ -522,6 +571,15 @@ func (u *Unpacker) unpack(
 					return
 				}
 			case <-fetchC[i-fetchOffset]:
+			}
+
+			// In case of parallel unpack, the parent snapshot isn't provided to the snapshotter.
+			// The overlayfs will return bind mounts for all layers, we need to convert them
+			// to overlay mounts for the applier to perform whiteout conversion correctly.
+			// TODO: this is a temporary workaround until #13053 lands.
+			// See: https://github.com/containerd/containerd/issues/13030
+			if i > 0 && parallel && unpack.SnapshotterKey == "overlayfs" {
+				mounts = bindToOverlay(mounts)
 			}
 
 			diff, err := a.Apply(ctx, desc, mounts, unpack.ApplyOpts...)
@@ -746,4 +804,24 @@ func uniquePart() string {
 	// Ignore read failures, just decreases uniqueness
 	rand.Read(b[:])
 	return fmt.Sprintf("%d-%s", t.Nanosecond(), base64.URLEncoding.EncodeToString(b[:]))
+}
+
+// TODO: this is a temporary workaround until #13053 lands.
+func bindToOverlay(mounts []mount.Mount) []mount.Mount {
+	if len(mounts) != 1 || mounts[0].Type != "bind" {
+		return mounts
+	}
+
+	m := mount.Mount{
+		Type:   "overlay",
+		Source: "overlay",
+	}
+	for _, o := range mounts[0].Options {
+		if o != "rbind" {
+			m.Options = append(m.Options, o)
+		}
+	}
+	m.Options = append(m.Options, "upperdir="+mounts[0].Source)
+
+	return []mount.Mount{m}
 }
