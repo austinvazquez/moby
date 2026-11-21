@@ -4,19 +4,21 @@ package cloudwatchlogs
 
 import (
 	"context"
-	"fmt"
-	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/schemas"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
+	smithy "github.com/aws/smithy-go"
 	"github.com/aws/smithy-go/middleware"
-	smithyhttp "github.com/aws/smithy-go/transport/http"
 )
 
 // Deletes a CloudWatch Logs account policy. This stops the account-wide policy
 // from applying to log groups or data sources in the account. If you delete a data
 // protection policy or subscription filter policy, any log-group level policies of
-// those types remain in effect. This operation supports deletion of data
-// source-based field index policies, including facet configurations, in addition
-// to log group-based policies.
+// those types remain in effect. If you delete a retention policy, the log groups
+// that it applied to use their own retention setting, unless another retention
+// policy applies to them. Deleting a retention policy does not restore log events
+// that CloudWatch Logs has already deleted. This operation supports deletion of
+// data source-based field index policies, including facet configurations, in
+// addition to log group-based policies.
 //
 // To use this operation, you must be signed on with the correct permissions
 // depending on the type of policy that you are deleting.
@@ -37,6 +39,11 @@ import (
 //
 //	facets will no longer be available for interactive exploration in the CloudWatch
 //	Logs Insights console. However, facet data is retained for up to 30 days.
+//
+//	- To delete a retention policy, you must have the logs:DeleteRetentionPolicy
+//	and logs:DeleteAccountPolicy permissions. To preview the impact of deleting a
+//	retention policy, specify true for dryRun . A dry run requires the same
+//	permissions as the operation that it previews, and no additional permissions.
 //
 // If you delete a field index policy, the indexing of the log events that
 // happened before you deleted the policy will still be used for up to 30 days to
@@ -68,90 +75,91 @@ type DeleteAccountPolicyInput struct {
 	// This member is required.
 	PolicyType types.PolicyType
 
+	// Specifies whether to preview the impact of deleting the policy without deleting
+	// it. If you specify true , CloudWatch Logs does not delete the policy and returns
+	// the estimated impact in dryRunResult . The default is false .
+	//
+	// Specifying dryRun is valid only when you specify RETENTION_POLICY for policyType
+	// . Only one dry run can be in progress for an account at a time.
+	DryRun bool
+
 	noSmithyDocumentSerde
 }
 
+func (v *DeleteAccountPolicyInput) Serialize(s smithy.ShapeSerializer) {
+	s.WriteStruct(schemas.DeleteAccountPolicyRequest)
+	v.SerializeMembers(s)
+	s.CloseStruct()
+}
+
+func (v *DeleteAccountPolicyInput) SerializeMembers(s smithy.ShapeSerializer) {
+	if v.DryRun != false {
+		s.WriteBool(schemas.DeleteAccountPolicyRequest_dryRun, v.DryRun)
+	}
+	if v.PolicyName != nil {
+		s.WriteString(schemas.DeleteAccountPolicyRequest_policyName, *v.PolicyName)
+	}
+	if v.PolicyType != "" {
+		s.WriteString(schemas.DeleteAccountPolicyRequest_policyType, string(v.PolicyType))
+	}
+}
+
 type DeleteAccountPolicyOutput struct {
+
+	// The estimated impact of deleting the policy. This field is returned only when
+	// the request specifies dryRun as true .
+	DryRunResult *types.DryRunResult
+
 	// Metadata pertaining to the operation's result.
 	ResultMetadata middleware.Metadata
 
 	noSmithyDocumentSerde
 }
 
+func (v *DeleteAccountPolicyOutput) Serialize(s smithy.ShapeSerializer) {
+	s.WriteStruct(schemas.DeleteAccountPolicyResponse)
+	v.SerializeMembers(s)
+	s.CloseStruct()
+}
+
+func (v *DeleteAccountPolicyOutput) SerializeMembers(s smithy.ShapeSerializer) {
+	if v.DryRunResult != nil {
+		s.WriteStruct(schemas.DeleteAccountPolicyResponse_dryRunResult)
+		v.DryRunResult.SerializeMembers(s)
+		s.CloseStruct()
+	}
+}
+func (v *DeleteAccountPolicyOutput) Deserialize(d smithy.ShapeDeserializer) error {
+	return smithy.ReadStruct(d, schemas.DeleteAccountPolicyResponse, func(s *smithy.Schema) error {
+		switch s {
+		case schemas.DeleteAccountPolicyResponse_dryRunResult:
+			v.DryRunResult = &types.DryRunResult{}
+			return v.DryRunResult.Deserialize(d)
+		}
+		return nil
+	})
+}
 func (c *Client) addOperationDeleteAccountPolicyMiddlewares(stack *middleware.Stack, options Options) (err error) {
-	if err := stack.Serialize.Add(&setOperationInputMiddleware{}, middleware.After); err != nil {
+	if err := stack.Serialize.Add(&serializeRequestMiddleware{options: &options, operationSchema: smithy.NewOperationSchema(schemas.DeleteAccountPolicy, schemas.DeleteAccountPolicyRequest, schemas.DeleteAccountPolicyResponse)}, middleware.After); err != nil {
 		return err
 	}
-	err = stack.Serialize.Add(&awsAwsjson11_serializeOpDeleteAccountPolicy{}, middleware.After)
-	if err != nil {
+	if err := stack.Deserialize.Add(&deserializeResponseMiddleware{options: &options, operationSchema: smithy.NewOperationSchema(schemas.DeleteAccountPolicy, schemas.DeleteAccountPolicyRequest, schemas.DeleteAccountPolicyResponse), output: &DeleteAccountPolicyOutput{}}, middleware.After); err != nil {
 		return err
-	}
-	err = stack.Deserialize.Add(&awsAwsjson11_deserializeOpDeleteAccountPolicy{}, middleware.After)
-	if err != nil {
-		return err
-	}
-	if err := addProtocolFinalizerMiddlewares(stack, options, "DeleteAccountPolicy"); err != nil {
-		return fmt.Errorf("add protocol finalizers: %v", err)
 	}
 
-	if err = addlegacyEndpointContextSetter(stack, options); err != nil {
-		return err
-	}
-	if err = addSetLoggerMiddleware(stack, options); err != nil {
-		return err
-	}
-	if err = addClientRequestID(stack); err != nil {
-		return err
-	}
-	if err = addComputeContentLength(stack); err != nil {
-		return err
-	}
 	if err = addResolveEndpointMiddleware(stack, options); err != nil {
 		return err
 	}
 	if err = addComputePayloadSHA256(stack); err != nil {
 		return err
 	}
-	if err = addRetry(stack, options); err != nil {
-		return err
-	}
-	if err = addRawResponseToMetadata(stack); err != nil {
-		return err
-	}
-	if err = addRecordResponseTiming(stack); err != nil {
-		return err
-	}
-	if err = addSpanRetryLoop(stack, options); err != nil {
-		return err
-	}
-	if err = addClientUserAgent(stack, options); err != nil {
-		return err
-	}
-	if err = smithyhttp.AddErrorCloseResponseBodyMiddleware(stack); err != nil {
-		return err
-	}
-	if err = smithyhttp.AddCloseResponseBodyMiddleware(stack); err != nil {
-		return err
-	}
-	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
-		return err
-	}
-	if err = addTimeOffsetBuild(stack, c); err != nil {
-		return err
-	}
-	if err = addUserAgentRetryMode(stack, options); err != nil {
+	if err = addRecordResponseTiming(stack, options); err != nil {
 		return err
 	}
 	if err = addCredentialSource(stack, options); err != nil {
 		return err
 	}
 	if err = addOpDeleteAccountPolicyValidationMiddleware(stack); err != nil {
-		return err
-	}
-	if err = stack.Initialize.Add(newServiceMetadataMiddleware_opDeleteAccountPolicy(options.Region), middleware.Before); err != nil {
-		return err
-	}
-	if err = addRecursionDetection(stack); err != nil {
 		return err
 	}
 	if err = addRequestIDRetrieverMiddleware(stack); err != nil {
@@ -166,22 +174,8 @@ func (c *Client) addOperationDeleteAccountPolicyMiddlewares(stack *middleware.St
 	if err = addDisableHTTPSMiddleware(stack, options); err != nil {
 		return err
 	}
-	if err = addInterceptBeforeRetryLoop(stack, options); err != nil {
-		return err
-	}
-	if err = addInterceptAttempt(stack, options); err != nil {
-		return err
-	}
 	if err = addInterceptors(stack, options); err != nil {
 		return err
 	}
 	return nil
-}
-
-func newServiceMetadataMiddleware_opDeleteAccountPolicy(region string) *awsmiddleware.RegisterServiceMetadata {
-	return &awsmiddleware.RegisterServiceMetadata{
-		Region:        region,
-		ServiceID:     ServiceID,
-		OperationName: "DeleteAccountPolicy",
-	}
 }
